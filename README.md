@@ -1,49 +1,50 @@
 # agile-md
 
 A tiny **filesystem Kanban** — tasks are markdown files moved between `todo/`,
-`doing/` and `done/` directories. Pure `bash` + `git`, no JavaScript, no runtime,
-nothing to install globally.
+`doing/` and `done/` directories. Pure `bash` + `git`, no JavaScript, no runtime.
 
 - **Status is the folder.** A task's column is simply which directory it's in.
 - **Git is the audit trail.** Moving a task is a `git mv`, so `git log --follow`
   reconstructs exactly when it started and finished.
-- **Self-contained.** The `task` script is vendored into each board, so it works
-  on clone with zero dependencies.
+- **One command, any repo.** Install `task` once on your PATH; it finds the
+  board at `<repository-root>/tasks` from wherever you are.
 
-## Install into a repository
-
-From the repo you want a board in:
+## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mrdoodles/agile-md/v1/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/mrdoodles/agile-md/v2/install.sh | bash
 ```
 
-Or clone and run `./install.sh [board-dir]` (default board dir: `tasks`). This
-creates `tasks/{todo,doing,done}/` and vendors the `task` script into `tasks/`.
+Installs the `task` command to `~/.local/bin` (override with
+`install.sh --dir /usr/local/bin`). If that directory isn't on your `PATH`, the
+installer tells you what to add.
 
-## Usage
+## Use
+
+In any git repository:
 
 ```bash
-tasks/task new "Publish to the Marketplace" -t release   # create in todo/
-tasks/task board                                         # show all columns
-tasks/task start 1                                       # todo  -> doing
-tasks/task done  1                                       # doing -> done
-tasks/task back  1                                       # move one column left
-tasks/task show  1                                       # print a task
-tasks/task edit  publish                                 # open in $EDITOR
+task init                          # scaffold tasks/{todo,doing,done} here
+task new "Publish to Marketplace" -t release
+task board                         # show all columns (the default)
+task start 1                       # todo  -> doing
+task done  1                       # doing -> done
+task back  1                       # move one column left
+task show  publish                 # print a task (id or slug substring)
+task edit  1                       # open in $EDITOR
 ```
 
-`<ref>` is a task id (e.g. `7` or `007`) or a unique slug substring
-(e.g. `publish`).
+`task` works from any subdirectory — it resolves the board from the repo root.
+Set `TASKS_DIR` to use a board directory other than `tasks`.
 
 ## Task format
 
-Each task is `todo/NNN-slug.md` with light frontmatter:
+Each task is `tasks/todo/NNN-slug.md` with light frontmatter:
 
 ```markdown
 ---
 id: "001"
-title: "Publish to the Marketplace"
+title: "Publish to Marketplace"
 created: "2026-08-01"
 tags: [release]
 ---
@@ -56,12 +57,12 @@ tags: [release]
 - [ ]
 ```
 
-The `NNN` id is assigned in creation order (across all columns) and also gives a
-stable default ordering. Commit task moves like any other change — the `git mv`
-is the record of the transition.
+The `NNN` id is assigned in creation order and gives a stable default ordering.
+Commit task moves like any other change — the `git mv` is the record of the
+transition. Tasks can reference each other with `[[NNN-slug]]` wikilinks.
 
 ## Why a directory instead of one big TODO.md?
 
 A single file gets unwieldy once tasks have real content, and every edit is a
-merge conflict magnet. Separate files keep tasks self-describing, diffable and
+merge-conflict magnet. Separate files keep tasks self-describing, diffable and
 independently movable, while the folders give an unambiguous board.

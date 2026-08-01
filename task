@@ -2,35 +2,48 @@
 #
 # task — a tiny filesystem Kanban in markdown (agile-md).
 #
-# The board is the directory that contains this script; `todo/`, `doing/` and
-# `done/` are siblings. Each task is a markdown file `NNN-slug.md`. Moving a task
-# between columns is a `git mv`, so the git history is the audit trail.
+# Install this on your PATH (see agile-md/install.sh) and it operates on the
+# board at <repository-root>/tasks (todo/ doing/ done/), discovered from your
+# current directory — so `task` works in any git repository.
 #
+#   task init                         create the board in this repository
 #   task new "<title>" [-t tag ...]   create a task in todo/
 #   task board                        show all columns (default)
-#   task ls [todo|doing|done|all]     list tasks in a column
-#   task start <ref>                  move todo -> doing
-#   task done  <ref>                  move doing -> done
+#   task ls [todo|doing|done|all]     list a column
+#   task start <ref>                  todo  -> doing
+#   task done  <ref>                  doing -> done
 #   task back  <ref>                  move a task one column left
 #   task show  <ref>                  print a task
 #   task edit  <ref>                  open a task in $EDITOR
 #
 # <ref> is a task id (e.g. 7 or 007) or a unique slug substring.
+# Set TASKS_DIR to use a board directory other than "tasks".
 #
 set -euo pipefail
 
-BOARD="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COLUMNS=(todo doing "done")
 
 die() { printf 'task: %s\n' "$*" >&2; exit 1; }
+
+# Board = <repo-root>/${TASKS_DIR:-tasks}, discovered from the current directory.
+board_dir() {
+  local root
+  root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+  [ -n "${root}" ] || die "not inside a git repository (agile-md boards live at <repo>/${TASKS_DIR:-tasks})"
+  printf '%s/%s' "${root}" "${TASKS_DIR:-tasks}"
+}
 
 slugify() {
   printf '%s' "$1" | tr '[:upper:]' '[:lower:]' \
     | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//' | cut -c1-50
 }
 
+meta() { awk -F'"' -v k="$2" 'index($0, k": ")==1 {print $2; exit}' "$1"; }
+
+column_of() { basename "$(dirname "$1")"; }
+
 next_id() {
-  local max=0 n f
+  local max=0 n f c
   for c in "${COLUMNS[@]}"; do
     for f in "${BOARD}/${c}"/*.md; do
       [ -e "${f}" ] || continue
@@ -41,10 +54,8 @@ next_id() {
   printf '%03d' $((max + 1))
 }
 
-meta() { awk -F'"' -v k="$2" 'index($0, k": ")==1 {print $2; exit}' "$1"; }
-
 find_task() { # <ref> -> prints the matching file path (must be unique)
-  local ref="$1" f base hits=()
+  local ref="$1" f base c hits=()
   for c in "${COLUMNS[@]}"; do
     for f in "${BOARD}/${c}"/*.md; do
       [ -e "${f}" ] || continue
@@ -61,14 +72,11 @@ find_task() { # <ref> -> prints the matching file path (must be unique)
   printf '%s' "${hits[0]}"
 }
 
-column_of() { basename "$(dirname "$1")"; }
-
 move() { # <file> <dest-column>
   local src="$1" col="$2" dest
   dest="${BOARD}/${col}/$(basename "${src}")"
   [ "$(column_of "${src}")" = "${col}" ] && die "already in ${col}/"
-  if git -C "${BOARD}" rev-parse >/dev/null 2>&1 \
-     && git -C "${BOARD}" ls-files --error-unmatch "${src}" >/dev/null 2>&1; then
+  if git -C "${BOARD}" ls-files --error-unmatch "${src}" >/dev/null 2>&1; then
     git -C "${BOARD}" mv "${src}" "${dest}"
   else
     mv "${src}" "${dest}"
@@ -88,9 +96,28 @@ list_column() {
   if [ "${found}" -eq 0 ]; then printf '  (empty)\n'; fi
 }
 
-usage() { sed -n '3,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '3,22p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 cmd="${1:-board}"; [ $# -gt 0 ] && shift || true
+
+case "${cmd}" in help|-h|--help) usage; exit 0 ;; esac
+
+if [ "${cmd}" = "init" ]; then
+  BOARD="$(board_dir)"
+  mkdir -p "${BOARD}/todo" "${BOARD}/doing" "${BOARD}/done"
+  for c in todo doing "done"; do
+    [ -e "${BOARD}/${c}/.gitkeep" ] || : > "${BOARD}/${c}/.gitkeep"
+  done
+  if [ ! -e "${BOARD}/README.md" ]; then
+    printf '# Tasks (agile-md)\n\nA filesystem Kanban managed by the `task` command.\nStatus is the folder; `git mv` between columns is the audit trail.\nSee https://github.com/mrdoodles/agile-md\n' > "${BOARD}/README.md"
+  fi
+  printf 'Initialised agile-md board at %s\n' "${BOARD}"
+  exit 0
+fi
+
+BOARD="$(board_dir)"
+[ -d "${BOARD}" ] || die "no board at ${BOARD} — run 'task init'"
+
 case "${cmd}" in
   new)
     title="${1:-}"; [ -n "${title}" ] || die 'usage: task new "<title>" [-t tag ...]'
@@ -136,6 +163,5 @@ case "${cmd}" in
     ;;
   show) cat "$(find_task "${1:?usage: task show <ref>}")" ;;
   edit) "${EDITOR:-vi}" "$(find_task "${1:?usage: task edit <ref>}")" ;;
-  help|-h|--help) usage ;;
   *) die "unknown command '${cmd}' (try: task help)" ;;
 esac
