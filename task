@@ -1,0 +1,141 @@
+#!/usr/bin/env bash
+#
+# task — a tiny filesystem Kanban in markdown (agile-md).
+#
+# The board is the directory that contains this script; `todo/`, `doing/` and
+# `done/` are siblings. Each task is a markdown file `NNN-slug.md`. Moving a task
+# between columns is a `git mv`, so the git history is the audit trail.
+#
+#   task new "<title>" [-t tag ...]   create a task in todo/
+#   task board                        show all columns (default)
+#   task ls [todo|doing|done|all]     list tasks in a column
+#   task start <ref>                  move todo -> doing
+#   task done  <ref>                  move doing -> done
+#   task back  <ref>                  move a task one column left
+#   task show  <ref>                  print a task
+#   task edit  <ref>                  open a task in $EDITOR
+#
+# <ref> is a task id (e.g. 7 or 007) or a unique slug substring.
+#
+set -euo pipefail
+
+BOARD="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+COLUMNS=(todo doing "done")
+
+die() { printf 'task: %s\n' "$*" >&2; exit 1; }
+
+slugify() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]' \
+    | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//' | cut -c1-50
+}
+
+next_id() {
+  local max=0 n f
+  for c in "${COLUMNS[@]}"; do
+    for f in "${BOARD}/${c}"/*.md; do
+      [ -e "${f}" ] || continue
+      n="$(basename "${f}" | sed -E 's/^0*([0-9]+)-.*/\1/')"
+      [[ "${n}" =~ ^[0-9]+$ ]] && [ "${n}" -gt "${max}" ] && max="${n}"
+    done
+  done
+  printf '%03d' $((max + 1))
+}
+
+meta() { awk -F'"' -v k="$2" 'index($0, k": ")==1 {print $2; exit}' "$1"; }
+
+find_task() { # <ref> -> prints the matching file path (must be unique)
+  local ref="$1" f base hits=()
+  for c in "${COLUMNS[@]}"; do
+    for f in "${BOARD}/${c}"/*.md; do
+      [ -e "${f}" ] || continue
+      base="$(basename "${f}" .md)"
+      if [[ "${ref}" =~ ^[0-9]+$ ]]; then
+        [[ "${base}" =~ ^0*${ref}- ]] && hits+=("${f}")
+      else
+        [[ "${base}" == *"${ref}"* ]] && hits+=("${f}")
+      fi
+    done
+  done
+  [ "${#hits[@]}" -eq 0 ] && die "no task matches '${ref}'"
+  [ "${#hits[@]}" -gt 1 ] && die "'${ref}' matches ${#hits[@]} tasks; be more specific"
+  printf '%s' "${hits[0]}"
+}
+
+column_of() { basename "$(dirname "$1")"; }
+
+move() { # <file> <dest-column>
+  local src="$1" col="$2" dest
+  dest="${BOARD}/${col}/$(basename "${src}")"
+  [ "$(column_of "${src}")" = "${col}" ] && die "already in ${col}/"
+  if git -C "${BOARD}" rev-parse >/dev/null 2>&1 \
+     && git -C "${BOARD}" ls-files --error-unmatch "${src}" >/dev/null 2>&1; then
+    git -C "${BOARD}" mv "${src}" "${dest}"
+  else
+    mv "${src}" "${dest}"
+  fi
+  printf 'moved %s -> %s/\n' "$(basename "${src}")" "${col}"
+}
+
+list_column() {
+  local c="$1" f id title found=0
+  printf '\n%s\n' "$(printf '%s' "${c}" | tr '[:lower:]' '[:upper:]')"
+  for f in "${BOARD}/${c}"/*.md; do
+    [ -e "${f}" ] || continue
+    found=1
+    id="$(meta "${f}" id)"; title="$(meta "${f}" title)"
+    printf '  [%s] %s\n' "${id:-???}" "${title:-$(basename "${f}" .md)}"
+  done
+  if [ "${found}" -eq 0 ]; then printf '  (empty)\n'; fi
+}
+
+usage() { sed -n '3,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+
+cmd="${1:-board}"; [ $# -gt 0 ] && shift || true
+case "${cmd}" in
+  new)
+    title="${1:-}"; [ -n "${title}" ] || die 'usage: task new "<title>" [-t tag ...]'
+    shift
+    tags=()
+    while [ $# -gt 0 ]; do
+      case "$1" in -t|--tag) tags+=("$2"); shift 2 ;; *) shift ;; esac
+    done
+    id="$(next_id)"; slug="$(slugify "${title}")"
+    file="${BOARD}/todo/${id}-${slug}.md"
+    taglist=""
+    [ "${#tags[@]}" -gt 0 ] && taglist="$(IFS=,; printf '%s' "${tags[*]}")"
+    {
+      printf -- '---\n'
+      printf 'id: "%s"\n' "${id}"
+      printf 'title: "%s"\n' "${title}"
+      printf 'created: "%s"\n' "$(date +%F)"
+      printf 'tags: [%s]\n' "${taglist}"
+      printf -- '---\n\n## Notes\n\n\n## Checklist\n\n- [ ] \n'
+    } > "${file}"
+    printf 'created todo/%s-%s.md\n' "${id}" "${slug}"
+    ;;
+  board)
+    for c in "${COLUMNS[@]}"; do list_column "${c}"; done
+    ;;
+  ls|list)
+    target="${1:-all}"
+    if [ "${target}" = "all" ]; then
+      for c in "${COLUMNS[@]}"; do list_column "${c}"; done
+    else
+      list_column "${target}"
+    fi
+    ;;
+  start) move "$(find_task "${1:?usage: task start <ref>}")" doing ;;
+  done)  move "$(find_task "${1:?usage: task done <ref>}")" "done" ;;
+  back)
+    file="$(find_task "${1:?usage: task back <ref>}")"
+    case "$(column_of "${file}")" in
+      done) move "${file}" doing ;;
+      doing) move "${file}" todo ;;
+      todo) die "already in todo/" ;;
+    esac
+    ;;
+  show) cat "$(find_task "${1:?usage: task show <ref>}")" ;;
+  edit) "${EDITOR:-vi}" "$(find_task "${1:?usage: task edit <ref>}")" ;;
+  help|-h|--help) usage ;;
+  *) die "unknown command '${cmd}' (try: task help)" ;;
+esac
