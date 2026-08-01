@@ -1,36 +1,36 @@
 #!/usr/bin/env bash
 #
-# task — a tiny filesystem Kanban in markdown (agile-md).
+# amd — a tiny filesystem Kanban in markdown (agile-md).
 #
 # Install this on your PATH (see agile-md/install.sh) and it operates on the
 # board at <repository-root>/tasks (todo/ doing/ done/), discovered from your
-# current directory — so `task` works in any git repository.
+# current directory — so `amd` works in any git repository.
 #
-#   task init                         create the board in this repository
-#   task new "<title>" [-t tag ...]   create a task in todo/
-#   task board                        show all columns (default)
-#   task ls [todo|doing|done|all]     list a column
-#   task start <ref>                  todo  -> doing
-#   task done  <ref>                  doing -> done
-#   task back  <ref>                  move a task one column left
-#   task show  <ref>                  print a task
-#   task edit  <ref>                  open a task in $EDITOR
+#   amd init                          create the board in this repository
+#   amd new "<title>" [-t tag ...]    create a task in todo/
+#   amd board                         show all columns (default)
+#   amd ls [todo|doing|done|all]      list a column
+#   amd start <ref>                   todo  -> doing
+#   amd done  <ref>                   doing -> done
+#   amd back  <ref>                   move a task one column left
+#   amd show  <ref>                   print a task
+#   amd edit  <ref>                   open a task in $EDITOR
 #
 # <ref> is a task id (e.g. 7 or 007) or a unique slug substring.
-# Set TASKS_DIR to use a board directory other than "tasks".
+# Set AMD_DIR to use a board directory other than "tasks".
 #
 set -euo pipefail
 
 COLUMNS=(todo doing "done")
 
-die() { printf 'task: %s\n' "$*" >&2; exit 1; }
+die() { printf 'amd: %s\n' "$*" >&2; exit 1; }
 
-# Board = <repo-root>/${TASKS_DIR:-tasks}, discovered from the current directory.
+# Board = <repo-root>/${AMD_DIR:-tasks}, discovered from the current directory.
 board_dir() {
   local root
   root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
-  [ -n "${root}" ] || die "not inside a git repository (agile-md boards live at <repo>/${TASKS_DIR:-tasks})"
-  printf '%s/%s' "${root}" "${TASKS_DIR:-tasks}"
+  [ -n "${root}" ] || die "not inside a git repository (agile-md boards live at <repo>/${AMD_DIR:-tasks})"
+  printf '%s/%s' "${root}" "${AMD_DIR:-tasks}"
 }
 
 slugify() {
@@ -102,23 +102,23 @@ create_board() { # scaffolds the board at $BOARD
     [ -e "${BOARD}/${c}/.gitkeep" ] || : > "${BOARD}/${c}/.gitkeep"
   done
   if [ ! -e "${BOARD}/README.md" ]; then
-    printf '# Tasks (agile-md)\n\nA filesystem Kanban managed by the `task` command.\nStatus is the folder; `git mv` between columns is the audit trail.\nSee https://github.com/mrdoodles/agile-md\n' > "${BOARD}/README.md"
+    printf '# Tasks (agile-md)\n\nA filesystem Kanban managed by the `amd` command.\nStatus is the folder; `git mv` between columns is the audit trail.\nSee https://github.com/mrdoodles/agile-md\n' > "${BOARD}/README.md"
   fi
 }
 
 # Resolve the board; if it doesn't exist, offer to create it (prompt when
-# interactive, TASK_YES=1 to force, otherwise a clear error so it never hangs).
+# interactive, AMD_YES=1 to force, otherwise a clear error so it never hangs).
 ensure_board() {
   BOARD="$(board_dir)"
   [ -d "${BOARD}" ] && return 0
   local reply=""
-  if [ "${TASK_YES:-}" = "1" ]; then
+  if [ "${AMD_YES:-}" = "1" ]; then
     reply=y
   elif [ -t 0 ]; then
     printf 'No task board found at %s\nCreate an empty board here? [y/N] ' "${BOARD}" >&2
     read -r reply
   else
-    die "no board at ${BOARD} — run 'task init' (or set TASK_YES=1)"
+    die "no board at ${BOARD} — run 'amd init' (or set AMD_YES=1)"
   fi
   case "${reply}" in
     y|Y|yes|Yes|YES) create_board; printf 'Created board at %s\n' "${BOARD}" >&2 ;;
@@ -126,7 +126,7 @@ ensure_board() {
   esac
 }
 
-usage() { sed -n '3,22p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { awk 'NR>=3 && /^#/ {sub(/^# ?/, ""); print; next} NR>=3 {exit}' "${BASH_SOURCE[0]}"; }
 
 cmd="${1:-board}"; [ $# -gt 0 ] && shift || true
 
@@ -143,7 +143,7 @@ ensure_board
 
 case "${cmd}" in
   new)
-    title="${1:-}"; [ -n "${title}" ] || die 'usage: task new "<title>" [-t tag ...]'
+    title="${1:-}"; [ -n "${title}" ] || die 'usage: amd new "<title>" [-t tag ...]'
     shift
     tags=()
     while [ $# -gt 0 ]; do
@@ -174,17 +174,17 @@ case "${cmd}" in
       list_column "${target}"
     fi
     ;;
-  start) move "$(find_task "${1:?usage: task start <ref>}")" doing ;;
-  done)  move "$(find_task "${1:?usage: task done <ref>}")" "done" ;;
+  start) move "$(find_task "${1:?usage: amd start <ref>}")" doing ;;
+  done)  move "$(find_task "${1:?usage: amd done <ref>}")" "done" ;;
   back)
-    file="$(find_task "${1:?usage: task back <ref>}")"
+    file="$(find_task "${1:?usage: amd back <ref>}")"
     case "$(column_of "${file}")" in
       done) move "${file}" doing ;;
       doing) move "${file}" todo ;;
       todo) die "already in todo/" ;;
     esac
     ;;
-  show) cat "$(find_task "${1:?usage: task show <ref>}")" ;;
-  edit) "${EDITOR:-vi}" "$(find_task "${1:?usage: task edit <ref>}")" ;;
-  *) die "unknown command '${cmd}' (try: task help)" ;;
+  show) cat "$(find_task "${1:?usage: amd show <ref>}")" ;;
+  edit) "${EDITOR:-vi}" "$(find_task "${1:?usage: amd edit <ref>}")" ;;
+  *) die "unknown command '${cmd}' (try: amd help)" ;;
 esac

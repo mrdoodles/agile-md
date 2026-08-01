@@ -6,16 +6,16 @@ A tiny **filesystem Kanban** — tasks are markdown files moved between `todo/`,
 - **Status is the folder.** A task's column is simply which directory it's in.
 - **Git is the audit trail.** Moving a task is a `git mv`, so `git log --follow`
   reconstructs exactly when it started and finished.
-- **One command, any repo.** Install `task` once on your PATH; it finds the
+- **One command, any repo.** Install `amd` once on your PATH; it finds the
   board at `<repository-root>/tasks` from wherever you are.
 
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mrdoodles/agile-md/v2/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/mrdoodles/agile-md/v3/install.sh | bash
 ```
 
-Installs the `task` command to `/usr/local/bin` when it's writable, otherwise
+Installs the `amd` command to `/usr/local/bin` when it's writable, otherwise
 `~/bin` (override with `install.sh --dir <dir>`). If the chosen directory isn't
 on your `PATH`, the installer tells you what to add.
 
@@ -24,22 +24,22 @@ on your `PATH`, the installer tells you what to add.
 In any git repository:
 
 ```bash
-task init                          # scaffold tasks/{todo,doing,done} here
-task new "Publish to Marketplace" -t release
-task board                         # show all columns (the default)
-task start 1                       # todo  -> doing
-task done  1                       # doing -> done
-task back  1                       # move one column left
-task show  publish                 # print a task (id or slug substring)
-task edit  1                       # open in $EDITOR
+amd init                          # scaffold tasks/{todo,doing,done} here
+amd new "Publish to Marketplace" -t release
+amd board                         # show all columns (the default)
+amd start 1                       # todo  -> doing
+amd done  1                       # doing -> done
+amd back  1                       # move one column left
+amd show  publish                 # print a task (id or slug substring)
+amd edit  1                       # open in $EDITOR
 ```
 
-`task` works from any subdirectory — it resolves the board from the repo root.
-Set `TASKS_DIR` to use a board directory other than `tasks`.
+`amd` works from any subdirectory — it resolves the board from the repo root.
+Set `AMD_DIR` to use a board directory other than `tasks`.
 
-If you run a command in a repo that has no board yet, `task` offers to create
+If you run a command in a repo that has no board yet, `amd` offers to create
 one for you (interactively). In non-interactive use it errors instead of
-hanging; set `TASK_YES=1` to create the board without prompting.
+hanging; set `AMD_YES=1` to create the board without prompting.
 
 ## Task format
 

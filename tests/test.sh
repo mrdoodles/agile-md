@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 #
-# Exercises the task CLI. Run: bash tests/test.sh
+# Exercises the amd CLI. Run: bash tests/test.sh
 #
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TASK="${ROOT}/task"
+AMD="${ROOT}/amd"
 
 pass=0
 fail=0
@@ -22,17 +22,17 @@ cd "${tmp}" || exit 1
 git init -q; git config user.email t@t.co; git config user.name t
 
 echo "init:"
-bash "${TASK}" init >/dev/null
+bash "${AMD}" init >/dev/null
 assert "init creates todo/doing/done" test -d tasks/todo -a -d tasks/doing -a -d tasks/done
 
 echo "discovery from a subdirectory:"
 mkdir -p deep/nested
 assert "runs from a subdir (finds repo-root board)" \
-  bash -c "cd deep/nested && bash '${TASK}' board | grep -q TODO"
+  bash -c "cd deep/nested && bash '${AMD}' board | grep -q TODO"
 
 echo "create:"
-bash "${TASK}" new "First task" >/dev/null
-bash "${TASK}" new "Second task" -t x -t y >/dev/null
+bash "${AMD}" new "First task" >/dev/null
+bash "${AMD}" new "Second task" -t x -t y >/dev/null
 git add -A; git commit -qm seed
 assert "creates tasks/todo/001-first-task.md" test -f tasks/todo/001-first-task.md
 assert "title in frontmatter" grep -q '^title: "First task"$' tasks/todo/001-first-task.md
@@ -40,33 +40,33 @@ assert "tags in frontmatter" grep -q '^tags: \[x,y\]$' tasks/todo/002-second-tas
 
 echo "board:"
 assert "board shows all three columns" \
-  bash -c "bash '${TASK}' board | grep -q TODO && bash '${TASK}' board | grep -q DOING && bash '${TASK}' board | grep -q DONE"
+  bash -c "bash '${AMD}' board | grep -q TODO && bash '${AMD}' board | grep -q DOING && bash '${AMD}' board | grep -q DONE"
 
 echo "moves (git mv):"
-bash "${TASK}" start 1 >/dev/null
+bash "${AMD}" start 1 >/dev/null
 assert "start: todo -> doing" test -f tasks/doing/001-first-task.md
-bash "${TASK}" "done" 1 >/dev/null
+bash "${AMD}" "done" 1 >/dev/null
 assert "done: doing -> done" test -f tasks/done/001-first-task.md
 assert "moved via git (rename tracked)" bash -c 'git status --porcelain | grep -q "^R"'
-bash "${TASK}" back 1 >/dev/null
+bash "${AMD}" back 1 >/dev/null
 assert "back: done -> doing" test -f tasks/doing/001-first-task.md
 
 echo "refs + ids:"
-bash "${TASK}" start second >/dev/null
+bash "${AMD}" start second >/dev/null
 assert "find by slug substring" test -f tasks/doing/002-second-task.md
-bash "${TASK}" new "Third" >/dev/null
+bash "${AMD}" new "Third" >/dev/null
 assert "ids continue across columns (003)" test -f tasks/todo/003-third.md
 
 echo "guards:"
 assert "errors outside a git repository" \
-  bash -c "cd '${nongit}' && ! bash '${TASK}' board"
+  bash -c "cd '${nongit}' && ! bash '${AMD}' board"
 
 echo "auto-create when no board exists:"
 fresh="$(mktemp -d)"; ( cd "${fresh}" && git init -q )
 assert "non-interactive with no board errors (no hang)" \
-  bash -c "cd '${fresh}' && ! bash '${TASK}' board </dev/null"
-assert "TASK_YES=1 creates the board and runs" \
-  bash -c "cd '${fresh}' && TASK_YES=1 bash '${TASK}' board >/dev/null && test -d tasks/todo"
+  bash -c "cd '${fresh}' && ! bash '${AMD}' board </dev/null"
+assert "AMD_YES=1 creates the board and runs" \
+  bash -c "cd '${fresh}' && AMD_YES=1 bash '${AMD}' board >/dev/null && test -d tasks/todo"
 rm -rf "${fresh}"
 
 echo

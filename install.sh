@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 #
-# agile-md installer — install the `task` command onto your PATH.
+# agile-md installer — install the `amd` command onto your PATH.
 #
 #   ./install.sh [--dir DIR]     # default: /usr/local/bin if writable, else ~/bin
-#   curl -fsSL https://raw.githubusercontent.com/mrdoodles/agile-md/v2/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/mrdoodles/agile-md/v3/install.sh | bash
 #
-# Then, in any git repository:  task init  &&  task new "My first task"
+# Then, in any git repository:  amd init  &&  amd new "My first task"
 #
 set -euo pipefail
 
@@ -25,20 +25,20 @@ if [ -z "${DIR}" ]; then
 fi
 
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RAW="https://raw.githubusercontent.com/mrdoodles/agile-md/v2"
+RAW="https://raw.githubusercontent.com/mrdoodles/agile-md/v3"
 
 mkdir -p "${DIR}"
-if [ -f "${SELF}/task" ]; then
-  cp "${SELF}/task" "${DIR}/task"
+if [ -f "${SELF}/amd" ]; then
+  cp "${SELF}/amd" "${DIR}/amd"
 else
-  curl -fsSL "${RAW}/task" -o "${DIR}/task"
+  curl -fsSL "${RAW}/amd" -o "${DIR}/amd"
 fi
-chmod +x "${DIR}/task"
+chmod +x "${DIR}/amd"
 
-echo "Installed task -> ${DIR}/task"
+echo "Installed amd -> ${DIR}/amd"
 case ":${PATH}:" in
   *":${DIR}:"*) ;;
   *) echo "Note: ${DIR} is not on your PATH. Add this to your shell profile:"
      echo "      export PATH=\"${DIR}:\$PATH\"" ;;
 esac
-echo "Then, in any repo:  task init  &&  task new \"My first task\""
+echo "Then, in any repo:  amd init  &&  amd new \"My first task\""
