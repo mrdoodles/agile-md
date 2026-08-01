@@ -15,9 +15,9 @@ A tiny **filesystem Kanban** — tasks are markdown files moved between `todo/`,
 curl -fsSL https://raw.githubusercontent.com/mrdoodles/agile-md/v2/install.sh | bash
 ```
 
-Installs the `task` command to `~/.local/bin` (override with
-`install.sh --dir /usr/local/bin`). If that directory isn't on your `PATH`, the
-installer tells you what to add.
+Installs the `task` command to `/usr/local/bin` when it's writable, otherwise
+`~/bin` (override with `install.sh --dir <dir>`). If the chosen directory isn't
+on your `PATH`, the installer tells you what to add.
 
 ## Use
 

@@ -2,20 +2,27 @@
 #
 # agile-md installer — install the `task` command onto your PATH.
 #
-#   ./install.sh [--dir DIR]     # from a clone (default DIR: ~/.local/bin)
+#   ./install.sh [--dir DIR]     # default: /usr/local/bin if writable, else ~/bin
 #   curl -fsSL https://raw.githubusercontent.com/mrdoodles/agile-md/v2/install.sh | bash
 #
 # Then, in any git repository:  task init  &&  task new "My first task"
 #
 set -euo pipefail
 
-DIR="${HOME}/.local/bin"
+DIR=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --dir) DIR="$2"; shift 2 ;;
     *) shift ;;
   esac
 done
+if [ -z "${DIR}" ]; then
+  if [ -d /usr/local/bin ] && [ -w /usr/local/bin ]; then
+    DIR="/usr/local/bin"
+  else
+    DIR="${HOME}/bin"
+  fi
+fi
 
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RAW="https://raw.githubusercontent.com/mrdoodles/agile-md/v2"
