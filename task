@@ -96,6 +96,36 @@ list_column() {
   if [ "${found}" -eq 0 ]; then printf '  (empty)\n'; fi
 }
 
+create_board() { # scaffolds the board at $BOARD
+  mkdir -p "${BOARD}/todo" "${BOARD}/doing" "${BOARD}/done"
+  for c in todo doing "done"; do
+    [ -e "${BOARD}/${c}/.gitkeep" ] || : > "${BOARD}/${c}/.gitkeep"
+  done
+  if [ ! -e "${BOARD}/README.md" ]; then
+    printf '# Tasks (agile-md)\n\nA filesystem Kanban managed by the `task` command.\nStatus is the folder; `git mv` between columns is the audit trail.\nSee https://github.com/mrdoodles/agile-md\n' > "${BOARD}/README.md"
+  fi
+}
+
+# Resolve the board; if it doesn't exist, offer to create it (prompt when
+# interactive, TASK_YES=1 to force, otherwise a clear error so it never hangs).
+ensure_board() {
+  BOARD="$(board_dir)"
+  [ -d "${BOARD}" ] && return 0
+  local reply=""
+  if [ "${TASK_YES:-}" = "1" ]; then
+    reply=y
+  elif [ -t 0 ]; then
+    printf 'No task board found at %s\nCreate an empty board here? [y/N] ' "${BOARD}" >&2
+    read -r reply
+  else
+    die "no board at ${BOARD} — run 'task init' (or set TASK_YES=1)"
+  fi
+  case "${reply}" in
+    y|Y|yes|Yes|YES) create_board; printf 'Created board at %s\n' "${BOARD}" >&2 ;;
+    *) die "no board created" ;;
+  esac
+}
+
 usage() { sed -n '3,22p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 cmd="${1:-board}"; [ $# -gt 0 ] && shift || true
@@ -104,19 +134,12 @@ case "${cmd}" in help|-h|--help) usage; exit 0 ;; esac
 
 if [ "${cmd}" = "init" ]; then
   BOARD="$(board_dir)"
-  mkdir -p "${BOARD}/todo" "${BOARD}/doing" "${BOARD}/done"
-  for c in todo doing "done"; do
-    [ -e "${BOARD}/${c}/.gitkeep" ] || : > "${BOARD}/${c}/.gitkeep"
-  done
-  if [ ! -e "${BOARD}/README.md" ]; then
-    printf '# Tasks (agile-md)\n\nA filesystem Kanban managed by the `task` command.\nStatus is the folder; `git mv` between columns is the audit trail.\nSee https://github.com/mrdoodles/agile-md\n' > "${BOARD}/README.md"
-  fi
+  create_board
   printf 'Initialised agile-md board at %s\n' "${BOARD}"
   exit 0
 fi
 
-BOARD="$(board_dir)"
-[ -d "${BOARD}" ] || die "no board at ${BOARD} — run 'task init'"
+ensure_board
 
 case "${cmd}" in
   new)

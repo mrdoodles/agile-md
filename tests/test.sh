@@ -61,6 +61,14 @@ echo "guards:"
 assert "errors outside a git repository" \
   bash -c "cd '${nongit}' && ! bash '${TASK}' board"
 
+echo "auto-create when no board exists:"
+fresh="$(mktemp -d)"; ( cd "${fresh}" && git init -q )
+assert "non-interactive with no board errors (no hang)" \
+  bash -c "cd '${fresh}' && ! bash '${TASK}' board </dev/null"
+assert "TASK_YES=1 creates the board and runs" \
+  bash -c "cd '${fresh}' && TASK_YES=1 bash '${TASK}' board >/dev/null && test -d tasks/todo"
+rm -rf "${fresh}"
+
 echo
 echo "passed: ${pass}, failed: ${fail}"
 [ "${fail}" -eq 0 ]

@@ -37,6 +37,10 @@ task edit  1                       # open in $EDITOR
 `task` works from any subdirectory — it resolves the board from the repo root.
 Set `TASKS_DIR` to use a board directory other than `tasks`.
 
+If you run a command in a repo that has no board yet, `task` offers to create
+one for you (interactively). In non-interactive use it errors instead of
+hanging; set `TASK_YES=1` to create the board without prompting.
+
 ## Task format
 
 Each task is `tasks/todo/NNN-slug.md` with light frontmatter:
