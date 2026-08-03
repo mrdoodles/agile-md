@@ -10,6 +10,8 @@ no daemon, no database.
 - **Tickets come from templates.** Task files are rendered from
   [MiniJinja](https://github.com/mitsuhiko/minijinja) templates, so the format
   is consistent by construction and yours to change.
+- **The template is the form.** Leave an argument out in a terminal and `amd`
+  asks — including the fields your own template declares.
 - **One command, any repo.** Install `amd` once on your PATH; it finds the
   board at `<repository-root>/tasks` from wherever you are.
 
@@ -47,6 +49,23 @@ amd edit  1                       # open in $EDITOR
 `amd` works from any subdirectory — it resolves the board from the repo root.
 Set `AMD_DIR` to use a board directory other than `tasks`.
 
+## Forms
+
+Every argument is optional in a terminal. Leave it out and you get a prompt
+([inquire](https://github.com/mikaelmello/inquire)) instead of a usage error:
+
+```bash
+amd new              # template picker, title, tags (tab-completes existing tags)
+amd new "Ship it" -i # same form, pre-filled with what you passed
+amd start            # pick from the tasks in todo/
+amd done             # pick from the tasks in doing/
+amd show / amd edit  # pick from the whole board
+```
+
+Nothing prompts unless both ends are a terminal, so scripts and CI behave
+exactly as before — a missing value is an error, never a hang. `--no-input`
+(or `AMD_NO_INPUT=1`) forces that behaviour in a terminal too.
+
 If you run a command in a repo that has no board yet, `amd` offers to create
 one for you (interactively). In non-interactive use it errors instead of
 hanging; set `AMD_YES=1` to create the board without prompting.
@@ -67,6 +86,22 @@ amd new "Ship it" -s owner=tim    # extra variables, as extra.owner
 Anything in `<board>/templates/<name>.md.jinja` overrides a built-in of the same
 name or adds a new one, so a repo can carry its own ticket format with no tool
 changes. Built-ins: `task`, `bug`, and `board-readme` (used by `amd init`).
+
+**A template that uses `extra.<name>` gets asked for it.** There's no second
+place to register fields — write this in `tasks/templates/story.md.jinja`:
+
+```jinja
+owner: {{ extra.owner | yaml }}
+
+## Acceptance criteria
+
+{{ extra.acceptance_criteria }}
+```
+
+…and `amd new "Fast board" -T story` asks "Owner:" and "Acceptance criteria:".
+Non-interactively the same fields must be supplied
+(`-s owner=tim -s acceptance_criteria=…`) or the command fails saying which are
+missing — so a half-filled ticket can't be created either way.
 
 Variables available in a task template:
 

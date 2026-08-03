@@ -149,6 +149,22 @@ impl Templates {
             .map(|(name, source)| (name.as_str(), source))
     }
 
+    /// Templates you can create a task from — everything except the internal
+    /// board README. These are the choices `amd new` offers.
+    pub fn task_templates(&self) -> Vec<String> {
+        self.sources
+            .keys()
+            .filter(|name| name.as_str() != BOARD_README)
+            .cloned()
+            .collect()
+    }
+
+    /// The `extra.*` fields a template needs, in order of first appearance —
+    /// the form `amd new` has to ask for.
+    pub fn required_extras(&self, name: &str) -> Result<Vec<String>> {
+        Ok(required_extras(&self.source_text(name)?))
+    }
+
     /// The template's text, from the board file or the binary.
     pub fn source_text(&self, name: &str) -> Result<String> {
         match self.sources.get(name) {
@@ -183,6 +199,63 @@ pub fn render_board_readme(board: &Board) -> Result<String> {
             created => today().0,
         },
     )
+}
+
+/// Every `extra.<key>` and `extra["<key>"]` a template source references, in
+/// order of first appearance and without duplicates.
+///
+/// This is what makes a template self-describing: adding a field to a template
+/// adds a question to the form, with no second place to register it. Undefined
+/// variables are a hard error, so a field that isn't collected would otherwise
+/// fail the render.
+pub fn required_extras(source: &str) -> Vec<String> {
+    const MARKER: &str = "extra";
+    let bytes = source.as_bytes();
+    let mut keys: Vec<String> = Vec::new();
+    let mut cursor = 0;
+    while let Some(offset) = source[cursor..].find(MARKER) {
+        let start = cursor + offset;
+        cursor = start + MARKER.len();
+        // Skip `my_extra`, `extras` and friends — only the bare name counts.
+        if start > 0 {
+            let before = bytes[start - 1];
+            if before == b'_' || before.is_ascii_alphanumeric() {
+                continue;
+            }
+        }
+        let rest = &source[cursor..];
+        let key = if let Some(rest) = rest.strip_prefix('.') {
+            rest.chars()
+                .take_while(|ch| ch.is_alphanumeric() || *ch == '_')
+                .collect()
+        } else if let Some(rest) = rest.strip_prefix('[') {
+            let rest = rest.trim_start();
+            match rest.chars().next() {
+                Some(quote @ ('"' | '\'')) => rest[1..]
+                    .split(quote)
+                    .next()
+                    .unwrap_or_default()
+                    .to_string(),
+                _ => String::new(),
+            }
+        } else {
+            String::new()
+        };
+        if !key.is_empty() && !keys.iter().any(|known| known == &key) {
+            keys.push(key);
+        }
+    }
+    keys
+}
+
+/// `steps_to_reproduce` -> `Steps to reproduce`, for prompt labels.
+pub fn field_label(key: &str) -> String {
+    let words = key.replace(['_', '-'], " ");
+    let mut chars = words.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => words,
+    }
 }
 
 /// The source of a built-in template, if `name` is one.
@@ -349,6 +422,50 @@ mod tests {
             .render("nope", ctx())
             .unwrap_err();
         assert!(format!("{err:#}").contains("amd templates"), "{err:#}");
+    }
+
+    #[test]
+    fn required_extras_are_found_in_order_without_duplicates() {
+        let source = "{{ extra.owner }} {{ extra.steps_to_reproduce }} {{ extra.owner }}";
+        assert_eq!(required_extras(source), ["owner", "steps_to_reproduce"]);
+    }
+
+    #[test]
+    fn required_extras_handles_subscripts_and_ignores_lookalikes() {
+        assert_eq!(required_extras(r#"{{ extra["due date"] }}"#), ["due date"]);
+        assert_eq!(required_extras("{{ extra['due'] }}"), ["due"]);
+        assert_eq!(
+            required_extras("{{ extras.owner }} {{ my_extra.x }}"),
+            [] as [String; 0]
+        );
+        assert_eq!(required_extras("{{ extra }}"), [] as [String; 0]);
+    }
+
+    #[test]
+    fn built_in_templates_ask_for_nothing_extra() {
+        for (name, source) in BUILTINS {
+            assert!(
+                required_extras(source).is_empty(),
+                "{name} would prompt for {:?}",
+                required_extras(source)
+            );
+        }
+    }
+
+    #[test]
+    fn field_labels_read_like_questions() {
+        assert_eq!(field_label("steps_to_reproduce"), "Steps to reproduce");
+        assert_eq!(field_label("owner"), "Owner");
+        assert_eq!(field_label(""), "");
+    }
+
+    #[test]
+    fn task_templates_exclude_the_board_readme() {
+        let templates = Templates::builtin().unwrap();
+        let names = templates.task_templates();
+        assert!(names.contains(&"task".to_string()));
+        assert!(names.contains(&"bug".to_string()));
+        assert!(!names.contains(&BOARD_README.to_string()));
     }
 
     #[test]

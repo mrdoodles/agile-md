@@ -6,11 +6,12 @@
 use std::env;
 use std::fmt;
 use std::fs;
-use std::io::{self, IsTerminal, Write};
+use std::io;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, anyhow, bail};
 
+use crate::form;
 use crate::git;
 use crate::task::Task;
 use crate::templates;
@@ -86,17 +87,9 @@ impl Board {
         }
         let create = if env::var("AMD_YES").as_deref() == Ok("1") {
             true
-        } else if io::stdin().is_terminal() {
-            let mut err = io::stderr();
-            write!(
-                err,
-                "No task board found at {}\nCreate an empty board here? [y/N] ",
-                board.root.display()
-            )?;
-            err.flush()?;
-            let mut reply = String::new();
-            io::stdin().read_line(&mut reply)?;
-            matches!(reply.trim().to_ascii_lowercase().as_str(), "y" | "yes")
+        } else if form::available() {
+            eprintln!("No task board found at {}", board.root.display());
+            form::confirm("Create an empty board here?")?
         } else {
             bail!(
                 "no board at {} — run 'amd init' (or set AMD_YES=1)",
@@ -176,6 +169,25 @@ impl Board {
             all.extend(self.tasks_in(column)?);
         }
         Ok(all)
+    }
+
+    /// Every tag already in use on the board, sorted and deduplicated — the
+    /// suggestions offered when a task is created interactively.
+    pub fn tags(&self) -> Result<Vec<String>> {
+        let mut tags: Vec<String> = Vec::new();
+        for task in self.tasks()? {
+            let Some(raw) = task.meta("tags") else {
+                continue;
+            };
+            for tag in raw.trim_matches(['[', ']']).split(',') {
+                let tag = tag.trim().trim_matches(['"', '\'']).to_string();
+                if !tag.is_empty() && !tags.contains(&tag) {
+                    tags.push(tag);
+                }
+            }
+        }
+        tags.sort();
+        Ok(tags)
     }
 
     /// Next id: one past the highest on the board, so ids are stable and never

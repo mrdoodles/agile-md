@@ -21,7 +21,9 @@ MiniJinja templates**.
 - `src/task.rs` — `Task` (path, column, id, stem), frontmatter `meta` lookup,
   `slugify`.
 - `src/templates.rs` — the MiniJinja `Environment`, built-in templates, board
-  overrides, `TaskContext`.
+  overrides, `TaskContext`, `required_extras`.
+- `src/form.rs` — every interactive prompt, built on `inquire` (text, select,
+  confirm, task picker, tag autocomplete).
 - `src/git.rs` — thin wrappers over the `git` CLI (`rev-parse`, `ls-files`,
   `mv`, `config`).
 - `templates/*.md.jinja` — the built-in templates, `include_str!`'d into the
@@ -52,7 +54,26 @@ MiniJinja templates**.
   auto-creates when `AMD_YES=1`, and otherwise errors (never hangs
   non-interactively).
 - Env vars: `AMD_DIR` (board dir name, default `tasks`), `AMD_YES` (force-create),
-  `EDITOR` (for `amd edit`).
+  `AMD_NO_INPUT` (never prompt), `EDITOR` (for `amd edit`).
+
+## Forms (`src/form.rs`)
+
+- **Prompting is always optional.** `form::available()` gates every prompt on
+  `stdin` *and* `stdout` being a terminal, plus `--no-input`/`AMD_NO_INPUT=1`.
+  Non-interactively a missing value is an error with the usage line — the same
+  contract the bash version had, and why the tool never hangs in CI.
+- Optional arguments drive it: `amd new` with no title runs the full form
+  (template select, title, tags), `-i` re-asks for what was passed, and
+  `start`/`done`/`back`/`show`/`edit` with no `<ref>` open a task picker
+  scoped to the columns that command can act on.
+- **The form is derived from the template**: `templates::required_extras()`
+  scans the source for `extra.<key>` / `extra["key"]`, and `cmd_new` prompts
+  for each one that `--set` didn't supply. Adding a field to a template adds a
+  question — there is deliberately no separate field registry to keep in sync.
+- `tests/test.sh` exports `AMD_NO_INPUT=1` so the suite stays hermetic when run
+  from a terminal; it covers the non-interactive halves of these paths. Drive
+  the interactive halves by hand through a pty (`script -q /dev/null amd new`).
+- Esc/Ctrl-C map to a plain `cancelled` error, not a panic or a partial task.
 
 ## Templates (the reason this is Rust)
 

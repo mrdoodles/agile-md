@@ -6,7 +6,13 @@
 # Unit tests for the pure logic (slugify, frontmatter, templates) live in the
 # Rust sources and run under `cargo test`.
 #
+# AMD_NO_INPUT=1 keeps the run hermetic: the suite covers the non-interactive
+# paths, and without it a prompt would block when the suite is run from a
+# terminal.
+#
 set -uo pipefail
+
+export AMD_NO_INPUT=1
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -96,6 +102,12 @@ assert "board template overrides the built-in" \
 assert "--set values reach the template" grep -q '^owner: "tim"$' tasks/todo/005-overridden.md
 assert "templates list shows the board override" \
   bash -c "'${AMD}' templates | grep -q 'templates/task.md.jinja'"
+printf -- '---\nid: {{ id | yaml }}\nowner: {{ extra.owner | yaml }}\ndue: {{ extra["due date"] | yaml }}\n---\n' \
+  > tasks/templates/task.md.jinja
+assert "a template field with no value is an error, naming the flag" \
+  bash -c "'${AMD}' new 'Needs fields' 2>&1 | grep -q -- '--set owner='"
+assert "every missing field is listed" \
+  bash -c "'${AMD}' new 'Needs fields' 2>&1 | grep -q -- '--set due date='"
 printf 'title: {{ titel }}\n' > tasks/templates/task.md.jinja
 assert "a typo'd variable is an error, not a blank line" \
   bash -c "! '${AMD}' new 'Broken' 2>&1 | grep -q '^title: $'"
@@ -111,6 +123,16 @@ assert "a quote in the title is escaped, not left to break the frontmatter" \
 echo "guards:"
 assert "errors outside a git repository" \
   bash -c "cd '${nongit}' && ! '${AMD}' board"
+
+echo "non-interactive (--no-input / AMD_NO_INPUT):"
+assert "new with no title errors instead of prompting" \
+  bash -c "! '${AMD}' new"
+assert "new with no title shows the usage line" \
+  bash -c "'${AMD}' new 2>&1 | grep -q 'usage: amd new'"
+assert "start with no ref errors instead of prompting" \
+  bash -c "'${AMD}' start 2>&1 | grep -q 'usage: amd start <ref>'"
+assert "--no-input works without the env var" \
+  bash -c "env -u AMD_NO_INPUT '${AMD}' --no-input show 2>&1 | grep -q 'usage: amd show <ref>'"
 
 echo "AMD_DIR:"
 assert "AMD_DIR relocates the board" \
