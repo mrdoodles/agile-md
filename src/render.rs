@@ -150,12 +150,14 @@ fn border_style(column: Column) -> Style {
     Style::parse(spec).unwrap_or_default()
 }
 
-/// `feat epic:checkout story:guest` — the labels, in a fixed order.
+/// `feat epic:checkout story:guest` — the labels, in a fixed order. The ticket
+/// type only shows when it isn't the usual one, so a board of development work
+/// doesn't repeat itself.
 fn labels(task: &Task) -> String {
     [
+        task.ticket()
+            .filter(|ticket| ticket != crate::templates::DEFAULT_TEMPLATE),
         task.kind(),
-        task.scope()
-            .filter(|scope| scope != crate::branch::DEFAULT_SCOPE),
         task.epic().map(|epic| format!("epic:{epic}")),
         task.story().map(|story| format!("story:{story}")),
     ]

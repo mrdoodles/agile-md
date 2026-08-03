@@ -58,39 +58,38 @@ MiniJinja templates**.
   auto-creates when `AMD_YES=1`, and otherwise errors (never hangs
   non-interactively).
 - Env vars: `AMD_DIR` (board dir name, default `tasks`), `AMD_TYPES` (type
-  labels), `AGILE_MD_SCOPES` (extra scope labels), `AMD_YES` (force-create), `AMD_NO_INPUT` (never prompt),
+  labels), `AMD_YES` (force-create), `AMD_NO_INPUT` (never prompt),
   `AMD_NO_BRANCH` (never touch branches), `NO_COLOR`/`--plain` (plain board),
   `EDITOR` (for `amd edit`).
 
-## Labels and branches (`src/branch.rs`)
+## Ticket types, labels and branches (`src/branch.rs`)
 
-- **One ticket kind, four labels**: `type` and `scope` (required), `epic` and
-  `story` (optional groupings, indexed by `amd epics` / `amd stories`), plus
-  free tags.
-- **`scope` decides whether there is a branch; `type` decides its name.**
-  `code` (the default) branches, everything else doesn't — an admin ticket has
-  nothing to check out, so it gets an empty `branch:` and `amd start` says why.
-  `AGILE_MD_SCOPES` *adds* to `code`/`admin` (note: `AMD_TYPES` *replaces*, and
-  this variable keeps the spelled-out prefix the ticket asked for).
-- Scope is settled before the title in the form, because the title's validation
-  depends on it: branch rules for code scope, "must make a filename" otherwise
-  (`branch::validate_sluggable`).
-- A task with no `scope` at all (created before scopes existed) keeps the old
-  behaviour and still branches.
-- `type` values are **conventional-commit** types (`feat`, `fix`, `docs`, …);
-  branches use the **branch** convention (`feature/`, `bugfix/`, `hotfix/`,
-  `chore/`). `prefix()` maps between them, matching the two lists in
-  mrdoodles/conventional-validator — so commits *and* branches validate.
-  `AMD_TYPES` overrides the accepted types; an entry that is already a branch
-  prefix keeps its own name.
+- **Two ticket types, and each is a template**: `development` (default) and
+  `admin`. Development work is tracked on a branch; admin work — a rota, a
+  renewal, an approval — has nothing to check out.
+- **The template decides whether there's a branch.** `Templates::branches()`
+  asks whether the template source references `branch`; the development one
+  does, the admin one doesn't. No flag, no separate registry, and a custom
+  template opts in just by using the variable. `templates::references()` is
+  word-boundary aware so `branches` and `my_branch` don't count.
+- On a development ticket the `type` label is a **conventional-commit** type
+  (`feat`, `fix`, …) and names the branch; branches use the **branch**
+  convention (`feature/`, `bugfix/`, `hotfix/`, `chore/`). `prefix()` maps
+  between them, matching the two lists in mrdoodles/conventional-validator, so
+  commits *and* branches validate. `AMD_TYPES` overrides the accepted types.
+- Optional `epic` and `story` labels group work on either ticket type
+  (`amd epics`, `amd stories`); tags stay free-form.
+- **Form order is title, ticket type, change, epic, story, tags** — the title
+  first because it's the one thing every ticket has and it names the file
+  whatever the labels turn out to be. It's validated with
+  `branch::validate_sluggable` (must make a filename); the branch-name check
+  happens once the type is known, which by then can only pass.
 - `amd start` moves the task and then switches to its branch. **Order matters**:
   `git mv` is staged first so the rename travels with the switch and lands on
-  the task's branch. The branch is read from the ticket's `branch:` frontmatter
-  (written at creation, so it's editable), then `--branch`, then type + title.
-- Titles are validated against git's ref rules at creation — the title becomes
-  the branch, so a title with nothing sluggable in it is rejected up front
-  rather than yielding a ticket that can never start. `slugify` returns an
-  empty string in that case; callers must reject it.
+  the task's branch. The branch comes from `--branch`, else the ticket's
+  `branch:` frontmatter (written at creation, so it's editable), else the
+  `type:` fallback. An admin ticket has none of those, so `amd start` says
+  "admin tickets don't use branches" and leaves the working tree alone.
 
 ## Board rendering (`src/render.rs`)
 
@@ -111,7 +110,8 @@ MiniJinja templates**.
   Non-interactively a missing value is an error with the usage line — the same
   contract the bash version had, and why the tool never hangs in CI.
 - Optional arguments drive it: `amd new` with no title runs the full form
-  (template, type, title, epic, story, tags), `-i` re-asks for what was passed, and
+  (title, ticket type, change, epic, story, tags), `-i` re-asks for what was
+  passed, and
   `start`/`done`/`back`/`show`/`edit` with no `<ref>` open a task picker
   scoped to the columns that command can act on.
 - **The form is derived from the template**: `templates::required_extras()`
@@ -134,7 +134,8 @@ MiniJinja templates**.
 
 ## Templates (the reason this is Rust)
 
-- Built-ins are compiled in via `include_str!` (`task`, `board-readme`).
+- Built-ins are compiled in via `include_str!` (`development`, `admin`,
+  `board-readme`) — the ticket types.
   Anything in `<board>/templates/<name>.md.jinja` overrides or adds to them;
   `amd templates eject <name>` writes an editable copy there.
 - The environment is deliberately configured: `UndefinedBehavior::Strict` (a
@@ -143,7 +144,7 @@ MiniJinja templates**.
 - Custom `yaml` filter quotes/escapes frontmatter values, so a title containing
   `"` can't corrupt the block. Use it for every frontmatter value.
 - `TaskContext` is the contract with templates (`id`, `number`, `title`, `slug`,
-  `type`, `scope`, `epic`, `story`, `branch`, `tags`, `created`, `timestamp`, `column`,
+  `type`, `epic`, `story`, `branch`, `tags`, `created`, `timestamp`, `column`,
   `author`, `email`, `board`, `template`, `extra`). Adding a field is additive;
   renaming one breaks every user template — treat it as a public API.
 - Template errors are flattened by `render_error()` (message + line + cause

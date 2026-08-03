@@ -30,16 +30,17 @@ A <REF> is a task id (e.g. 7 or 007) or a unique slug substring. Leave it out
 in a terminal and amd asks: `amd new` fills in a form, `amd start` offers a
 list of tasks to pick from.
 
-Every task carries labels: a type (feat, fix, docs, … — the conventional
-commit types), a scope (code, admin, …) plus optional epic and story
-labels. The type decides the branch, so `amd start` on a code-scope feat
-titled \"Add login\" creates and switches to feature/add-login. Work in any
-other scope gets no branch.
+There are two ticket types: development and admin. Development work is
+tracked on a branch named from its change type (feat, fix, docs, … — the
+conventional commit types), so `amd start` on a feat titled \"Add login\"
+creates and switches to feature/add-login. Admin work — a rota, a renewal,
+an approval — has nothing to check out, so it gets no branch.
+
+Both carry optional epic and story labels.
 
 Environment:
   AMD_DIR       board directory name under the repository root (default: tasks)
-  AMD_TYPES     comma-separated type labels (default: conventional commits)
-  AGILE_MD_SCOPES  extra scope labels, added to code and admin
+  AMD_TYPES     comma-separated change types (default: conventional commits)
   AMD_YES       set to 1 to create a missing board without prompting
   AMD_NO_INPUT  set to 1 to never prompt (same as --no-input)
   AMD_NO_BRANCH set to 1 to never create branches (same as --no-branch)
@@ -141,10 +142,6 @@ struct NewArgs {
     /// Type label: a conventional-commit type (feat, fix, docs, chore, …)
     #[arg(long, value_name = "TYPE")]
     r#type: Option<String>,
-    /// Scope label: what kind of work this is (code, admin, …). Only code
-    /// scope tasks get a branch
-    #[arg(long, value_name = "SCOPE")]
-    scope: Option<String>,
     /// Epic label this task belongs to
     #[arg(short = 'E', long, value_name = "EPIC")]
     epic: Option<String>,
@@ -154,8 +151,8 @@ struct NewArgs {
     /// Tag to add (repeatable)
     #[arg(short = 't', long = "tag", value_name = "TAG")]
     tags: Vec<String>,
-    /// Template to render
-    #[arg(short = 'T', long, default_value = DEFAULT_TEMPLATE, value_name = "NAME")]
+    /// Ticket type: development (the default) or admin
+    #[arg(short = 'T', long = "template", alias = "ticket", default_value = DEFAULT_TEMPLATE, value_name = "TYPE")]
     template: String,
     /// Ask for every field, even the ones given as arguments
     #[arg(short, long)]
@@ -267,17 +264,11 @@ fn cmd_start(
     no_branch: bool,
 ) -> Result<()> {
     // Read everything off the ticket before the move — afterwards the path is
-    // stale. A scope that doesn't use branches wins over the type fallback,
-    // but an explicit --branch still wins over the scope.
-    let scope = task.scope();
-    let branched = scope
-        .as_deref()
-        .map(branch::scope_creates_branch)
-        // Tasks created before scopes existed keep the old behaviour.
-        .unwrap_or(true);
+    // stale. An admin ticket records no branch and no type, so there is
+    // nothing to switch to unless --branch says otherwise.
+    let ticket = task.ticket();
     let wanted = match override_branch {
         Some(name) => Some(name),
-        None if !branched => None,
         None => match task.branch() {
             Some(name) => Some(name),
             // Older tasks (and custom templates) may carry only a type label.
@@ -294,8 +285,8 @@ fn cmd_start(
         return Ok(());
     }
     let Some(name) = wanted else {
-        match scope.filter(|_| !branched) {
-            Some(scope) => eprintln!("amd: {scope} scope work doesn't use branches"),
+        match ticket {
+            Some(ticket) => eprintln!("amd: {ticket} tickets don't use branches"),
             None => eprintln!("amd: no type or branch on this task; left the branch alone"),
         }
         return Ok(());
@@ -408,10 +399,20 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
         bail!("usage: amd new \"<title>\" [-t tag ...]");
     }
 
+    // The title first: it's the one thing every ticket has, and it names the
+    // file whatever the labels turn out to be.
+    let title = match args.title {
+        Some(title) if !args.interactive => title,
+        title => form::title(title.as_deref())?,
+    };
+    branch::validate_sluggable(&title)?;
+
+    // Then the ticket type. Development work is tracked on a branch; admin
+    // work (a rota, a renewal, an approval) has nothing to check out.
     let template = if full_form {
         let choices = templates.task_templates();
         if choices.len() > 1 {
-            form::select("Template:", choices, &args.template)?
+            form::select("Ticket type:", choices, &args.template)?
         } else {
             args.template.clone()
         }
@@ -419,43 +420,25 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
         args.template.clone()
     };
 
-    // The type label doubles as the branch prefix, so it's asked first: the
-    // title validator needs it to show the branch the title will produce.
-    let kind = match args.r#type {
-        Some(kind) => {
-            branch::validate_type(&kind)?;
-            kind
+    // Whether this ticket gets a branch is the template's call: one that
+    // records a `branch` needs a commit type to name it, one that doesn't
+    // never asks.
+    let branched = templates.branches(&template)?;
+    let kind = if branched {
+        match args.r#type {
+            Some(kind) => {
+                branch::validate_type(&kind)?;
+                kind
+            }
+            None if full_form => form::select("Change:", branch::types(), &branch::default_type())?,
+            None => branch::default_type(),
         }
-        None if full_form => form::select("Type:", branch::types(), &branch::default_type())?,
-        None => branch::default_type(),
+    } else {
+        String::new()
     };
-
-    // Scope decides whether this task gets a branch at all, so it's settled
-    // before the title: the title's rules depend on the answer.
-    let scope = match args.scope {
-        Some(scope) => {
-            branch::validate_scope(&scope)?;
-            scope
-        }
-        None if full_form => form::select(
-            "Scope:",
-            branch::scopes(),
-            &branch::DEFAULT_SCOPE.to_string(),
-        )?,
-        None => branch::DEFAULT_SCOPE.to_string(),
-    };
-    let branched = branch::scope_creates_branch(&scope);
-
-    let title = match args.title {
-        Some(title) if !args.interactive => title,
-        title => form::title(branched.then_some(kind.as_str()), title.as_deref())?,
-    };
-    // Non-interactively this is where an unusable title stops.
     let branch_name = if branched {
-        branch::validate_title(&kind, &title)?;
         branch::for_title(&kind, &title)?
     } else {
-        branch::validate_sluggable(&title)?;
         String::new()
     };
 
@@ -504,7 +487,6 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
         title,
         slug: slug.clone(),
         kind,
-        scope,
         epic,
         story,
         branch: branch_name.clone(),

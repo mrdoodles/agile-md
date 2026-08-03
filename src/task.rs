@@ -68,10 +68,9 @@ impl Task {
         self.meta("type").filter(|kind| !kind.is_empty())
     }
 
-    /// The `scope` label, if the task carries one. Tasks created before
-    /// scopes existed have none, and keep the old branch behaviour.
-    pub fn scope(&self) -> Option<String> {
-        self.meta("scope").filter(|scope| !scope.is_empty())
+    /// The ticket type (`development`, `admin`), if the task records one.
+    pub fn ticket(&self) -> Option<String> {
+        self.meta("ticket").filter(|ticket| !ticket.is_empty())
     }
 
     /// The `epic` label, if the task carries one.

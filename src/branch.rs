@@ -1,11 +1,15 @@
-//! Ticket labels, and the branch names they produce.
+//! Ticket types, labels, and the branch names they produce.
 //!
-//! There is one kind of ticket. What varies is its **labels**:
+//! There are two kinds of ticket — a **development** ticket and an **admin**
+//! ticket — and each is a template. Development work gets a branch; admin work
+//! (a rota, a renewal, an approval) has nothing to check out, so it doesn't.
+//! The rule lives in the template itself: a ticket whose template records a
+//! `branch` gets one, which means a custom template opts in by using it.
 //!
-//! - `type` — a conventional-commit type (`feat`, `fix`, `docs`, …). Required,
-//!   defaults to `feat`. It decides the branch prefix.
-//! - `scope` — what kind of work it is. Required, defaults to `code`. Only
-//!   `code` work gets a branch: an `admin` ticket has nothing to check out.
+//! On top of that every ticket carries labels:
+//!
+//! - `type` — a conventional-commit type (`feat`, `fix`, `docs`, …) on
+//!   development tickets. It decides the branch prefix.
 //! - `epic` — optional, groups tasks across a body of work.
 //! - `story` — optional, groups tasks within an epic.
 //!
@@ -33,50 +37,6 @@ const PREFIXES: [(&str, &str); 3] = [("feat", "feature"), ("fix", "bugfix"), ("r
 
 /// Fallback branch prefix for types with no specific mapping.
 const DEFAULT_PREFIX: &str = "chore";
-
-/// Scopes every board understands. `AGILE_MD_SCOPES` adds to this list rather
-/// than replacing it, so `code` and `admin` are always available.
-pub const DEFAULT_SCOPES: [&str; 2] = ["code", "admin"];
-
-/// The scope a task gets when `--scope` isn't given — and the only one that
-/// produces a branch.
-pub const DEFAULT_SCOPE: &str = "code";
-
-/// The scopes this board accepts: the built-in ones plus anything in
-/// `AGILE_MD_SCOPES` (comma or space separated).
-pub fn scopes() -> Vec<String> {
-    let mut scopes: Vec<String> = DEFAULT_SCOPES
-        .iter()
-        .map(|scope| (*scope).to_string())
-        .collect();
-    if let Ok(raw) = env::var("AGILE_MD_SCOPES") {
-        for scope in raw.split([',', ' ']) {
-            let scope = scope.trim();
-            if !scope.is_empty() && !scopes.iter().any(|known| known == scope) {
-                scopes.push(scope.to_string());
-            }
-        }
-    }
-    scopes
-}
-
-/// Check a scope against the accepted list.
-pub fn validate_scope(scope: &str) -> Result<()> {
-    let scopes = scopes();
-    if scopes.iter().any(|known| known == scope) {
-        return Ok(());
-    }
-    bail!(
-        "unknown scope '{scope}' (expected one of: {}; set AGILE_MD_SCOPES to add more)",
-        scopes.join(", ")
-    )
-}
-
-/// Does work in this scope get a branch? Only code does — there is nothing to
-/// check out for an admin task, and an empty branch on the board is noise.
-pub fn scope_creates_branch(scope: &str) -> bool {
-    scope == DEFAULT_SCOPE
-}
 
 /// The type labels this board accepts.
 pub fn types() -> Vec<String> {
@@ -192,17 +152,9 @@ pub fn validate(name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Check a title early, so `amd new` fails at the prompt rather than leaving a
-/// task that can never produce a branch.
-pub fn validate_title(kind: &str, title: &str) -> Result<()> {
-    if title.trim().is_empty() {
-        bail!("a title is required");
-    }
-    for_title(kind, title).map(|_| ())
-}
-
-/// The weaker check for scopes that get no branch: the title still has to make
-/// a filename.
+/// Check a title early, at the prompt: it has to make a filename, and for a
+/// development ticket that filename slug is also the branch. Catching it here
+/// beats leaving a ticket that can never start.
 pub fn validate_sluggable(title: &str) -> Result<()> {
     if title.trim().is_empty() {
         bail!("a title is required");
@@ -247,7 +199,6 @@ mod tests {
     fn a_title_with_nothing_sluggable_is_rejected() {
         let err = for_title("feat", "***").unwrap_err().to_string();
         assert!(err.contains("no letters or numbers"), "{err}");
-        assert!(validate_title("feat", "   ").is_err());
     }
 
     #[test]
@@ -281,24 +232,7 @@ mod tests {
     }
 
     #[test]
-    fn only_code_scope_gets_a_branch() {
-        assert!(scope_creates_branch("code"));
-        assert!(!scope_creates_branch("admin"));
-        assert!(!scope_creates_branch("docs"));
-    }
-
-    #[test]
-    fn the_default_scopes_are_code_and_admin() {
-        assert_eq!(scopes(), DEFAULT_SCOPES);
-        assert_eq!(DEFAULT_SCOPE, "code");
-        assert!(validate_scope("admin").is_ok());
-        let err = validate_scope("nope").unwrap_err().to_string();
-        assert!(err.contains("unknown scope 'nope'"), "{err}");
-        assert!(err.contains("AGILE_MD_SCOPES"), "{err}");
-    }
-
-    #[test]
-    fn titles_for_unbranched_scopes_only_need_a_filename() {
+    fn titles_for_admin_tickets_only_need_a_filename() {
         assert!(validate_sluggable("Update the rota").is_ok());
         assert!(validate_sluggable("***").is_err());
         assert!(validate_sluggable("  ").is_err());

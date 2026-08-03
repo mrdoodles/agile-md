@@ -87,19 +87,20 @@ assert "board lists the task by id and title" \
   bash -c "'${AMD}' board | grep -q '\[001\] First task'"
 assert "empty columns say so" bash -c "'${AMD}' ls doing | grep -q '(empty)'"
 
-echo "scopes:"
-assert "scope defaults to code" grep -q '^scope: "code"$' tasks/todo/001-first-task.md
-"${AMD}" new "Update the rota" --scope admin >/dev/null
-assert "admin scope is stored" grep -q '^scope: "admin"$' tasks/todo/006-update-the-rota.md
-assert "admin scope tickets carry no branch" grep -q '^branch: ""$' tasks/todo/006-update-the-rota.md
-assert "an unknown scope is rejected, listing the valid ones" \
-  bash -c "'${AMD}' new 'Nope' --scope nope 2>&1 | grep -q \"unknown scope 'nope'\""
-assert "AGILE_MD_SCOPES adds to the scope list" \
-  bash -c "AGILE_MD_SCOPES=docs '${AMD}' new 'Nope' --scope nope 2>&1 | grep -q 'code, admin, docs'"
-assert "AGILE_MD_SCOPES makes the extra scope usable" \
-  bash -c "AGILE_MD_SCOPES=docs '${AMD}' new 'Write it up' --scope docs >/dev/null && grep -q '^scope: \"docs\"\$' tasks/todo/007-write-it-up.md"
-assert "the board shows a non-default scope" \
-  bash -c "'${AMD}' board | grep -q 'Update the rota  (feat admin)'"
+echo "ticket types:"
+assert "tickets record their type" grep -q '^ticket: "development"$' tasks/todo/001-first-task.md
+"${AMD}" new "Renew the certificates" --ticket admin >/dev/null
+assert "admin tickets record their type" grep -q '^ticket: "admin"$' tasks/todo/006-renew-the-certificates.md
+assert "admin tickets carry no branch" \
+  bash -c "! grep -q '^branch:' tasks/todo/006-renew-the-certificates.md"
+assert "admin tickets carry no change type" \
+  bash -c "! grep -q '^type:' tasks/todo/006-renew-the-certificates.md"
+assert "development tickets carry both" \
+  bash -c "grep -q '^type: \"feat\"$' tasks/todo/001-first-task.md && grep -q '^branch: \"feature/first-task\"$' tasks/todo/001-first-task.md"
+assert "templates lists both ticket types" \
+  bash -c "'${AMD}' templates | grep -q '^development' && '${AMD}' templates | grep -q '^admin'"
+assert "the board flags a non-development ticket" \
+  bash -c "'${AMD}' board | grep -q 'Renew the certificates  (admin)'"
 
 echo "moves (git mv) + branches:"
 git add -A; git commit -qm labels
@@ -111,12 +112,12 @@ assert "the staged move travelled to the new branch" \
   bash -c "git status --porcelain | grep -q 'tasks/doing/001-first-task.md'"
 git checkout -q main 2>/dev/null || git checkout -q master
 "${AMD}" start 6 >/dev/null
-assert "admin scope work creates no branch" \
-  bash -c "! git branch --list 'chore/update-the-rota' | grep -q ."
-assert "admin scope work still moves to doing" test -f tasks/doing/006-update-the-rota.md
+assert "admin work creates no branch" \
+  bash -c "! git branch --list 'feature/renew-the-certificates' | grep -q ."
+assert "admin work still moves to doing" test -f tasks/doing/006-renew-the-certificates.md
 assert "start says why it left the branch alone" \
-  bash -c "'${AMD}' back 6 >/dev/null && '${AMD}' start 6 2>&1 | grep -q \"admin scope work doesn't use branches\""
-assert "code scope work does create a branch" \
+  bash -c "'${AMD}' back 6 >/dev/null && '${AMD}' start 6 2>&1 | grep -q \"admin tickets don't use branches\""
+assert "development work does create a branch" \
   bash -c "git branch --list 'feature/first-task' | grep -q ."
 "${AMD}" --no-input start 3 --no-branch >/dev/null
 assert "--no-branch leaves the branch alone" \
@@ -141,22 +142,22 @@ echo "refs + ids:"
 assert "find by slug substring" test -f tasks/doing/002-second-task.md
 git checkout -q main 2>/dev/null || git checkout -q master
 "${AMD}" new "Third" >/dev/null
-assert "ids continue across columns (008)" test -f tasks/todo/008-third.md
+assert "ids continue across columns (007)" test -f tasks/todo/007-third.md
 assert "unknown ref fails" bash -c "! '${AMD}' show 99"
 assert "ambiguous ref fails" bash -c "! '${AMD}' show task"
-assert "show prints the file" bash -c "'${AMD}' show 008 | grep -q '^title: \"Third\"$'"
+assert "show prints the file" bash -c "'${AMD}' show 007 | grep -q '^title: \"Third\"$'"
 
 echo "templates:"
-assert "templates lists the built-in task template" \
-  bash -c "'${AMD}' templates | grep -q '^task  *built-in$'"
+assert "templates says where each ticket type comes from" \
+  bash -c "'${AMD}' templates | grep -q '^development  *built-in$'"
 assert "unknown template fails with a hint" \
   bash -c "'${AMD}' new 'Nope' --template nope 2>&1 | grep -q 'amd templates'"
 assert "eject writes an editable copy into the board" \
-  bash -c "'${AMD}' templates eject task >/dev/null && test -f tasks/templates/task.md.jinja"
+  bash -c "'${AMD}' templates eject development >/dev/null && test -f tasks/templates/development.md.jinja"
 assert "eject refuses to clobber without --force" \
-  bash -c "! '${AMD}' templates eject task"
+  bash -c "! '${AMD}' templates eject development"
 printf -- '---\nid: {{ id | yaml }}\ntitle: {{ title | yaml }}\ntype: {{ type | yaml }}\nepic: {{ epic | yaml }}\nowner: {{ extra.owner | yaml }}\n---\n\n## Custom\n' \
-  > tasks/templates/task.md.jinja
+  > tasks/templates/development.md.jinja
 assert "board template overrides the built-in" \
   bash -c "'${AMD}' new 'Overridden' -s owner=tim --epic checkout >/dev/null && grep -q '^## Custom$' tasks/todo/*-overridden.md"
 assert "--set values reach the template" \
@@ -164,18 +165,18 @@ assert "--set values reach the template" \
 assert "labels reach a custom template" \
   bash -c "grep -q '^epic: \"checkout\"$' tasks/todo/*-overridden.md"
 assert "templates list shows the board override" \
-  bash -c "'${AMD}' templates | grep -q 'templates/task.md.jinja'"
+  bash -c "'${AMD}' templates | grep -q 'templates/development.md.jinja'"
 printf -- '---\nid: {{ id | yaml }}\nowner: {{ extra.owner | yaml }}\ndue: {{ extra["due date"] | yaml }}\n---\n' \
-  > tasks/templates/task.md.jinja
+  > tasks/templates/development.md.jinja
 assert "a template field with no value is an error, naming the flag" \
   bash -c "'${AMD}' new 'Needs fields' 2>&1 | grep -q -- '--set owner='"
 assert "every missing field is listed" \
   bash -c "'${AMD}' new 'Needs fields' 2>&1 | grep -q -- '--set due date='"
-printf 'title: {{ titel }}\n' > tasks/templates/task.md.jinja
+printf 'title: {{ titel }}\n' > tasks/templates/development.md.jinja
 assert "a typo'd variable is an error, not a blank line" \
   bash -c "! '${AMD}' new 'Broken' 2>&1 | grep -q '^title: $'"
 assert "the template error names the template and line" \
-  bash -c "'${AMD}' new 'Broken' 2>&1 | grep -q \"template 'task'\""
+  bash -c "'${AMD}' new 'Broken' 2>&1 | grep -q \"template 'development'\""
 rm -rf tasks/templates
 
 echo "the body editor:"

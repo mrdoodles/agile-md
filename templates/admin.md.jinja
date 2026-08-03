@@ -1,11 +1,9 @@
 ---
 id: {{ id | yaml }}
 title: {{ title | yaml }}
-type: {{ type | yaml }}
-scope: {{ scope | yaml }}
+ticket: {{ template | yaml }}
 epic: {{ epic | yaml }}
 story: {{ story | yaml }}
-branch: {{ branch | yaml }}
 created: {{ created | yaml }}
 tags: [{{ tags | join(",") }}]
 ---

@@ -23,8 +23,8 @@ use time::macros::format_description;
 
 use crate::board::{Board, Column};
 
-/// Template used by `amd new` when `--template` isn't given.
-pub const DEFAULT_TEMPLATE: &str = "task";
+/// Ticket type used by `amd new` when one isn't chosen.
+pub const DEFAULT_TEMPLATE: &str = "development";
 
 /// Suffix for template files in `<board>/templates/`.
 pub const TEMPLATE_SUFFIX: &str = ".md.jinja";
@@ -33,7 +33,11 @@ pub const TEMPLATE_SUFFIX: &str = ".md.jinja";
 const BOARD_README: &str = "board-readme";
 
 const BUILTINS: &[(&str, &str)] = &[
-    ("task", include_str!("../templates/task.md.jinja")),
+    (
+        "development",
+        include_str!("../templates/development.md.jinja"),
+    ),
+    ("admin", include_str!("../templates/admin.md.jinja")),
     (
         BOARD_README,
         include_str!("../templates/board-readme.md.jinja"),
@@ -68,15 +72,12 @@ pub struct TaskContext {
     /// Type label — also the branch prefix (`feature`, `bugfix`, …).
     #[serde(rename = "type")]
     pub kind: String,
-    /// Scope label: what kind of work this is (`code`, `admin`, …). Only code
-    /// scope gets a branch.
-    pub scope: String,
     /// Epic label, or an empty string.
     pub epic: String,
     /// Story label, or an empty string.
     pub story: String,
     /// Branch this task will get on `amd start`, e.g. `feature/add-login`.
-    /// Empty for scopes that don't use branches.
+    /// Empty on ticket types that don't use branches.
     pub branch: String,
     pub tags: Vec<String>,
     /// Local date, `YYYY-MM-DD`.
@@ -177,6 +178,14 @@ impl Templates {
         Ok(required_extras(&self.source_text(name)?))
     }
 
+    /// Does this ticket type record a branch? That's what makes it development
+    /// work: an admin template never mentions `branch`, so no branch is
+    /// computed for it and `amd start` leaves the working tree where it is.
+    /// A custom template opts in simply by using the variable.
+    pub fn branches(&self, name: &str) -> Result<bool> {
+        Ok(references(&self.source_text(name)?, "branch"))
+    }
+
     /// The template's text, from the board file or the binary.
     pub fn source_text(&self, name: &str) -> Result<String> {
         match self.sources.get(name) {
@@ -259,6 +268,29 @@ pub fn required_extras(source: &str) -> Vec<String> {
         }
     }
     keys
+}
+
+/// Does a template use `name` as a variable of its own? Word-boundary aware,
+/// so `branches` and `my_branch` don't count as `branch`.
+pub fn references(source: &str, name: &str) -> bool {
+    let bytes = source.as_bytes();
+    let mut cursor = 0;
+    while let Some(offset) = source[cursor..].find(name) {
+        let start = cursor + offset;
+        cursor = start + name.len();
+        let before_ok = start == 0 || {
+            let before = bytes[start - 1];
+            !(before == b'_' || before.is_ascii_alphanumeric() || before == b'.')
+        };
+        let after_ok = match bytes.get(cursor) {
+            None => true,
+            Some(after) => !(*after == b'_' || after.is_ascii_alphanumeric()),
+        };
+        if before_ok && after_ok {
+            return true;
+        }
+    }
+    false
 }
 
 /// `steps_to_reproduce` -> `Steps to reproduce`, for prompt labels.
@@ -357,7 +389,6 @@ mod tests {
             title: "First task".to_string(),
             slug: "first-task".to_string(),
             kind: "feat".to_string(),
-            scope: "code".to_string(),
             epic: "checkout".to_string(),
             story: "guest-checkout".to_string(),
             branch: "feature/first-task".to_string(),
@@ -368,19 +399,21 @@ mod tests {
             author: "t".to_string(),
             email: "t@t.co".to_string(),
             board: "tasks".to_string(),
-            template: "task".to_string(),
+            template: "development".to_string(),
             extra: BTreeMap::new(),
         }
     }
 
     #[test]
-    fn task_template_renders_the_documented_frontmatter() {
-        let rendered = Templates::builtin().unwrap().render("task", ctx()).unwrap();
+    fn development_template_renders_the_documented_frontmatter() {
+        let rendered = Templates::builtin()
+            .unwrap()
+            .render("development", ctx())
+            .unwrap();
         assert!(rendered.starts_with("---\n"), "{rendered}");
         assert!(rendered.contains("\nid: \"001\"\n"), "{rendered}");
         assert!(rendered.contains("\ntitle: \"First task\"\n"), "{rendered}");
         assert!(rendered.contains("\ntype: \"feat\"\n"), "{rendered}");
-        assert!(rendered.contains("\nscope: \"code\"\n"), "{rendered}");
         assert!(rendered.contains("\nepic: \"checkout\"\n"), "{rendered}");
         assert!(
             rendered.contains("\nstory: \"guest-checkout\"\n"),
@@ -391,7 +424,11 @@ mod tests {
             "{rendered}"
         );
         assert!(rendered.contains("\ntags: [x,y]\n"), "{rendered}");
-        assert!(rendered.contains("## Checklist"), "{rendered}");
+        assert!(
+            rendered.contains("\nticket: \"development\"\n"),
+            "{rendered}"
+        );
+        assert!(rendered.contains("## Acceptance criteria"), "{rendered}");
         assert!(rendered.ends_with('\n'), "{rendered}");
     }
 
@@ -412,7 +449,10 @@ mod tests {
     fn a_title_with_quotes_cannot_break_the_frontmatter() {
         let mut c = ctx();
         c.title = r#"Fix the "quoted" \ thing"#.to_string();
-        let rendered = Templates::builtin().unwrap().render("task", c).unwrap();
+        let rendered = Templates::builtin()
+            .unwrap()
+            .render("development", c)
+            .unwrap();
         assert!(
             rendered.contains(r#"title: "Fix the \"quoted\" \\ thing""#),
             "{rendered}"
@@ -492,8 +532,23 @@ mod tests {
     fn task_templates_exclude_the_board_readme() {
         let templates = Templates::builtin().unwrap();
         let names = templates.task_templates();
-        assert!(names.contains(&"task".to_string()));
+        assert!(names.contains(&"development".to_string()));
+        assert!(names.contains(&"admin".to_string()));
         assert!(!names.contains(&BOARD_README.to_string()));
+    }
+
+    #[test]
+    fn only_the_development_ticket_records_a_branch() {
+        let templates = Templates::builtin().unwrap();
+        assert!(templates.branches("development").unwrap());
+        assert!(!templates.branches("admin").unwrap());
+    }
+
+    #[test]
+    fn references_is_word_boundary_aware() {
+        assert!(references("branch: {{ branch | yaml }}", "branch"));
+        assert!(!references("{{ branches }} {{ my_branch }}", "branch"));
+        assert!(!references("{{ task.branch }}", "branch"));
     }
 
     #[test]

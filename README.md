@@ -12,9 +12,9 @@ no daemon, no database.
   is consistent by construction and yours to change.
 - **The template is the form.** Leave an argument out in a terminal and `amd`
   asks — including the fields your own template declares.
-- **Labels, not ticket types.** One kind of ticket, labelled with a
-  conventional-commit `type` plus optional `epic` and `story`. The type is the
-  branch prefix, so `amd start` puts you on `feature/add-login`.
+- **Two ticket types.** Development work is tracked on a branch named from its
+  conventional-commit type — `amd start` puts you on `feature/add-login`. Admin
+  work gets no branch. Both take optional `epic` and `story` labels.
 - **One command, any repo.** Install `amd` once on your PATH; it finds the
   board at `<repository-root>/tasks` from wherever you are.
 
@@ -53,36 +53,42 @@ amd epics                         # epics with progress; amd stories does the sa
 `amd` works from any subdirectory — it resolves the board from the repo root.
 Set `AMD_DIR` to use a board directory other than `tasks`.
 
-## Labels and branches
+## Ticket types
 
-There is one kind of ticket. What varies is its labels:
+Two kinds of ticket, each a template:
 
-| Label   | Required | Values                                                            |
-| ------- | -------- | ----------------------------------------------------------------- |
-| `type`  | yes      | conventional-commit types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert` (default `feat`; override the list with `AMD_TYPES`) |
-| `scope` | yes      | `code` (default) or `admin`; add more with `AGILE_MD_SCOPES`. Only `code` work gets a branch |
-| `epic`  | no       | anything — groups tasks across a body of work (`amd epics`)        |
-| `story` | no       | anything — groups tasks within an epic (`amd stories`)             |
-| `tags`  | no       | free-form, completed against the tags already on the board         |
-
-**Scope decides whether there's a branch at all**, and the **type decides what
-it's called**. An `admin` ticket — a rota, an approval, a meeting — is real work
-with nothing to check out, so it gets no branch and no empty `branch:` line:
+| Ticket type   | Branch?                              | Frontmatter                        |
+| ------------- | ------------------------------------ | ---------------------------------- |
+| `development` | yes — `<prefix>/<title>`             | `type`, `branch`, epic, story, tags |
+| `admin`       | no — a rota or a renewal has nothing to check out | epic, story, tags     |
 
 ```bash
-amd new "Renew the certificates" --scope admin   # created todo/004-renew-the-certificates.md
-amd start 4                                      # moves it; "admin scope work doesn't use branches"
-AGILE_MD_SCOPES=docs,design amd new "Redraw the diagram" --scope design
+amd new "Add login"                          # development, the default
+amd new "Renew the certificates" -T admin    # admin
+amd start 1                                  # development: switches to feature/add-login
+amd start 2                                  # admin: "admin tickets don't use branches"
 ```
 
-`AGILE_MD_SCOPES` **adds** to the built-in scopes rather than replacing them, so
-`code` and `admin` are always available (unlike `AMD_TYPES`, which replaces).
+The rule lives in the template, not in a flag: a ticket type whose template
+records a `branch` gets one. Your own template opts in the same way, just by
+using the variable.
 
-For code-scope work, the type decides the branch. Ticket types are *commit* types, branches
+## Labels
+
+On top of the ticket type:
+
+| Label   | On            | Values                                                    |
+| ------- | ------------- | --------------------------------------------------------- |
+| `type`  | development   | conventional-commit types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert` (default `feat`; the list is `AMD_TYPES`) |
+| `epic`  | both          | optional — groups tasks across a body of work (`amd epics`) |
+| `story` | both          | optional — groups tasks within an epic (`amd stories`)      |
+| `tags`  | both          | free-form, completed against the tags already on the board  |
+
+The change type **names** the branch. Ticket types are *commit* types, branches
 follow the *branch* convention, and `amd` maps between them — so both halves
 satisfy [conventional-validator](https://github.com/mrdoodles/conventional-validator):
 
-| type                                            | branch prefix |
+| change type                                     | branch prefix |
 | ----------------------------------------------- | ------------- |
 | `feat`                                          | `feature/`    |
 | `fix`                                           | `bugfix/`     |
@@ -90,17 +96,15 @@ satisfy [conventional-validator](https://github.com/mrdoodles/conventional-valid
 | `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore` | `chore/`      |
 
 ```bash
-amd new "Add login" --type feat        # created todo/001-add-login.md (feature/add-login)
-amd start 1                            # moves the task and switches to feature/add-login
-amd start 1 --branch spike/try-it      # …or a branch you name
-amd start 1 --no-branch                # …or none at all (AMD_NO_BRANCH=1 for good)
+amd new "Crash on save" --type fix     # created todo/003-crash-on-save.md (bugfix/crash-on-save)
+amd start 3 --branch spike/try-it      # …or a branch you name
+amd start 3 --no-branch                # …or none at all (AMD_NO_BRANCH=1 for good)
 ```
 
-The branch name is written into the ticket's frontmatter at creation, so you
-can see it — and edit it — before any work starts. Because the title becomes a
-branch, it's **validated against git's ref rules** when the task is created: a
-title with nothing sluggable in it is rejected at the prompt rather than
-producing a ticket that can never start.
+The branch name is written into the ticket at creation, so you can see it — and
+edit it — before any work starts. Because the title becomes a branch, it's
+**validated when you type it**: a title with nothing sluggable in it is rejected
+rather than producing a ticket that can never start.
 
 ## Forms
 
@@ -108,7 +112,7 @@ Every argument is optional in a terminal. Leave it out and you get a prompt
 ([inquire](https://github.com/mikaelmello/inquire)) instead of a usage error:
 
 ```bash
-amd new                # type, scope, title, epic, story, tags, then the body in $EDITOR
+amd new                # title, ticket type, change, epic, story, tags, then the body in $EDITOR
 amd new "Ship it" -i   # same form, pre-filled with what you passed
 amd new "Ship it" -e   # straight to the body editor
 amd new "Ship it"      # one-liner, no editor (--no-edit forces this)
@@ -138,15 +142,16 @@ hand, so a ticket can't come out half-formatted:
 
 ```bash
 amd templates                     # what's available, and where it comes from
-amd templates show task           # print the source
-amd templates eject task          # copy it to tasks/templates/ to edit
-amd new "Crash on save" -T story  # use a different template
+amd templates show development    # print the source
+amd templates eject development   # copy it to tasks/templates/ to edit
+amd new "Renew the certs" -T admin # use a different ticket type
 amd new "Ship it" -s owner=tim    # extra variables, as extra.owner
 ```
 
 Anything in `<board>/templates/<name>.md.jinja` overrides a built-in of the same
 name or adds a new one, so a repo can carry its own ticket format with no tool
-changes. Built-ins: `task` and `board-readme` (used by `amd init`).
+changes. Built-ins: `development`, `admin`, and `board-readme` (used by
+`amd init`).
 
 **A template that uses `extra.<name>` gets asked for it.** There's no second
 place to register fields — write this in `tasks/templates/story.md.jinja`:
@@ -172,8 +177,7 @@ Variables available in a task template:
 | `number`    | `7`                         |
 | `title`     | `Publish to Marketplace`    |
 | `slug`      | `publish-to-marketplace`    |
-| `type`      | `feat`                      |
-| `scope`     | `code`                      |
+| `type`      | `feat` (empty on admin)     |
 | `epic`      | `launch` (or empty)         |
 | `story`     | `guest-checkout` (or empty) |
 | `branch`    | `feature/publish-to-marketplace` |
@@ -200,8 +204,8 @@ Each task is `tasks/todo/NNN-slug.md`, from the built-in `task` template:
 ---
 id: "001"
 title: "Publish to Marketplace"
+ticket: "development"
 type: "feat"
-scope: "code"
 epic: "launch"
 story: ""
 branch: "feature/publish-to-marketplace"
