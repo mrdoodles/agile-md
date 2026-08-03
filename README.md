@@ -94,12 +94,20 @@ Every argument is optional in a terminal. Leave it out and you get a prompt
 ([inquire](https://github.com/mikaelmello/inquire)) instead of a usage error:
 
 ```bash
-amd new              # type, title, epic, story, tags (all tab-complete)
-amd new "Ship it" -i # same form, pre-filled with what you passed
-amd start            # pick from the tasks in todo/
-amd done             # pick from the tasks in doing/
-amd show / amd edit  # pick from the whole board
+amd new                # type, title, epic, story, tags, then the body in $EDITOR
+amd new "Ship it" -i   # same form, pre-filled with what you passed
+amd new "Ship it" -e   # straight to the body editor
+amd new "Ship it"      # one-liner, no editor (--no-edit forces this)
+amd start              # pick from the tasks in todo/
+amd done               # pick from the tasks in doing/
+amd show / amd edit    # pick from the whole board
 ```
+
+The form doesn't stop at the metadata: it finishes by opening the rendered
+ticket in `$EDITOR` — like `git commit` — so the notes and checklist are filled
+in while the task is being created. Nothing is written to the board until the
+editor exits cleanly, so quitting with a non-zero status (`:cq` in vim) or
+emptying the file creates nothing.
 
 Nothing prompts unless both ends are a terminal, so scripts and CI behave
 exactly as before — a missing value is an error, never a hang. `--no-input`

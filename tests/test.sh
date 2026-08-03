@@ -154,10 +154,18 @@ assert "the template error names the template and line" \
   bash -c "'${AMD}' new 'Broken' 2>&1 | grep -q \"template 'task'\""
 rm -rf tasks/templates
 
+echo "the body editor:"
+assert "non-interactive create never opens an editor" \
+  bash -c "EDITOR=false '${AMD}' new 'No editor here' >/dev/null && test -f tasks/todo/*-no-editor-here.md"
+assert "--no-edit is accepted alongside a title" \
+  bash -c "'${AMD}' new 'Also no editor' --no-edit >/dev/null"
+assert "--edit and --no-edit conflict" \
+  bash -c "! '${AMD}' new 'Both' --edit --no-edit"
+
 echo "quoting:"
 "${AMD}" new 'Fix the "quoted" thing' >/dev/null
 assert "a quote in the title is escaped, not left to break the frontmatter" \
-  grep -qF 'title: "Fix the \"quoted\" thing"' tasks/todo/008-fix-the-quoted-thing.md
+  bash -c "grep -qF 'title: \"Fix the \\\"quoted\\\" thing\"' tasks/todo/*-fix-the-quoted-thing.md"
 
 echo "guards:"
 assert "errors outside a git repository" \

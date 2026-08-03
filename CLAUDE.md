@@ -111,6 +111,15 @@ MiniJinja templates**.
   from a terminal; it covers the non-interactive halves of these paths. Drive
   the interactive halves by hand through a pty (`script -q /dev/null amd new`).
 - Esc/Ctrl-C map to a plain `cancelled` error, not a panic or a partial task.
+- **The form ends in the body.** `form::body()` renders the ticket into a temp
+  file, opens `$EDITOR` on it (splitting the command so `code --wait` works)
+  and returns what came back; `cmd_new` only writes to the board afterwards.
+  A non-zero editor exit or an emptied file creates nothing. Deliberately not
+  inquire's `Editor` prompt: that waits for an `e` keypress first, which is the
+  stop this was meant to remove. Default on when the form ran or `-e`; off with
+  `--no-edit` and whenever prompting isn't available, so scripts and CI never
+  spawn an editor. Unit-testable without a TTY — pass `true`/`false` as the
+  editor command.
 
 ## Templates (the reason this is Rust)
 

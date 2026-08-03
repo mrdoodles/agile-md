@@ -6,11 +6,14 @@
 //! prompts off entirely, so CI fails with a clear message instead of blocking.
 
 use std::env;
+use std::ffi::OsStr;
 use std::fmt;
-use std::io::{self, IsTerminal};
+use std::fs;
+use std::io::{self, IsTerminal, Write};
+use std::process::Command;
 use std::sync::OnceLock;
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use inquire::autocompletion::{Autocomplete, Replacement};
 use inquire::validator::Validation;
 use inquire::{Confirm, CustomUserError, InquireError, Select, Text};
@@ -67,6 +70,44 @@ pub fn title(kind: &str, default: Option<&str>) -> Result<String> {
         prompt = prompt.with_initial_value(default);
     }
     Ok(convert(prompt.prompt())?.trim().to_string())
+}
+
+/// The last step of the form: the ticket itself, opened in `$EDITOR` with the
+/// rendered template already in it, so the notes and checklist get filled in
+/// while the task is being created rather than in a second pass.
+///
+/// Modelled on `git commit`: the editor opens straight away (inquire's own
+/// editor prompt waits for a keypress first), and nothing is written to the
+/// board until it exits cleanly — so abandoning the edit leaves no half-made
+/// ticket behind.
+pub fn body(rendered: &str, editor: &OsStr) -> Result<String> {
+    let mut file = tempfile::Builder::new()
+        .prefix("amd-")
+        .suffix(".md")
+        .tempfile()
+        .context("creating a temporary file for the ticket")?;
+    file.write_all(rendered.as_bytes())
+        .context("writing the ticket to edit")?;
+    file.flush().context("writing the ticket to edit")?;
+
+    // $EDITOR can carry arguments ("code --wait", "emacsclient -nw").
+    let spec = editor.to_string_lossy();
+    let mut parts = spec.split_whitespace();
+    let program = parts.next().unwrap_or("vi");
+    let status = Command::new(program)
+        .args(parts)
+        .arg(file.path())
+        .status()
+        .with_context(|| format!("running {spec}"))?;
+    if !status.success() {
+        bail!("{spec} exited with {status}; no task created");
+    }
+
+    let edited = fs::read_to_string(file.path()).context("reading the edited ticket")?;
+    if edited.trim().is_empty() {
+        bail!("the ticket was left empty; no task created");
+    }
+    Ok(edited)
 }
 
 /// A single label, completing against the ones already on the board. Empty
@@ -233,9 +274,35 @@ fn convert<T>(result: Result<T, InquireError>) -> Result<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsString;
 
     fn autocomplete() -> Completer {
         Completer::multi(vec!["docs".into(), "release".into(), "regression".into()])
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn body_returns_what_the_editor_left_behind() {
+        // `true` accepts the file and changes nothing.
+        let rendered = "---\nid: \"001\"\n---\n\n## Notes\n";
+        let edited = body(rendered, &OsString::from("true")).unwrap();
+        assert_eq!(edited, rendered);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn body_refuses_to_create_a_task_when_the_editor_fails() {
+        let err = body("x", &OsString::from("false")).unwrap_err().to_string();
+        assert!(err.contains("no task created"), "{err}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn body_refuses_an_empty_ticket() {
+        let err = body("   \n", &OsString::from("true"))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("left empty"), "{err}");
     }
 
     #[test]

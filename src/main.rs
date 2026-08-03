@@ -13,6 +13,7 @@ mod task;
 mod templates;
 
 use std::collections::BTreeMap;
+use std::ffi::OsStr;
 use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
@@ -41,6 +42,9 @@ Environment:
   AMD_NO_INPUT  set to 1 to never prompt (same as --no-input)
   AMD_NO_BRANCH set to 1 to never create branches (same as --no-branch)
   EDITOR        editor used by `amd edit` (default: vi)
+
+Creating a task interactively ends in $EDITOR with the rendered ticket, so
+the notes and checklist get filled in there and then (--no-edit to skip).
 
 Tasks are rendered from MiniJinja templates. `amd templates` lists them and
 `amd templates eject task` writes an editable copy into <board>/templates/.
@@ -153,9 +157,12 @@ struct NewArgs {
     /// Extra template variable, available as extra.KEY (repeatable)
     #[arg(short = 's', long = "set", value_name = "KEY=VALUE", value_parser = parse_key_value)]
     set: Vec<(String, String)>,
-    /// Open the new task in $EDITOR
+    /// Open the ticket body in $EDITOR, even when the title came from the CLI
     #[arg(short, long)]
     edit: bool,
+    /// Create the ticket from the template without opening an editor
+    #[arg(long, conflicts_with = "edit")]
+    no_edit: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -472,12 +479,21 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
         extra,
     };
 
-    let body = templates.render(&template, &context)?;
+    let rendered = templates.render(&template, &context)?;
+
+    // The form doesn't stop at the metadata: unless told otherwise, it opens
+    // the rendered ticket so the notes and checklist are filled in as part of
+    // creating it. Nothing is written until the editor exits, so abandoning
+    // the edit leaves no half-made task behind.
+    let edit = !args.no_edit && form::available() && (args.edit || full_form);
+    let body = if edit {
+        form::body(&rendered, OsStr::new(&editor_command()))?
+    } else {
+        rendered
+    };
+
     fs::write(&path, body).with_context(|| format!("writing {}", path.display()))?;
     println!("created {}/{id}-{slug}.md ({branch_name})", Column::Todo);
-    if args.edit {
-        open_editor(&path)?;
-    }
     Ok(())
 }
 
@@ -527,11 +543,16 @@ fn cmd_templates(board: &Board, command: TemplateCmd) -> Result<()> {
     }
 }
 
-fn open_editor(path: &Path) -> Result<()> {
-    let editor = std::env::var("EDITOR")
+/// `$EDITOR`, or `vi` — used by both `amd edit` and the form's body step.
+fn editor_command() -> String {
+    std::env::var("EDITOR")
         .ok()
         .filter(|editor| !editor.is_empty())
-        .unwrap_or_else(|| "vi".to_string());
+        .unwrap_or_else(|| "vi".to_string())
+}
+
+fn open_editor(path: &Path) -> Result<()> {
+    let editor = editor_command();
     let status = Command::new(&editor)
         .arg(path)
         .status()
