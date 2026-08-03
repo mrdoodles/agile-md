@@ -19,6 +19,7 @@ anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 inquire = "0.9"
 minijinja = "2"
+richrs = "0.2"
 serde = { version = "1", features = ["derive"] }
 time = { version = "0.3", features = ["formatting", "local-offset", "macros"] }
 

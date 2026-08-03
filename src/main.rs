@@ -5,8 +5,10 @@
 //! ticket format is a MiniJinja template you can edit.
 
 mod board;
+mod branch;
 mod form;
 mod git;
+mod render;
 mod task;
 mod templates;
 
@@ -27,10 +29,17 @@ A <REF> is a task id (e.g. 7 or 007) or a unique slug substring. Leave it out
 in a terminal and amd asks: `amd new` fills in a form, `amd start` offers a
 list of tasks to pick from.
 
+Every task carries labels: a type (feat, fix, docs, … — the conventional
+commit types) plus optional epic and story labels. The type decides the
+branch, so `amd start` on a feat titled \"Add login\" creates and switches to
+feature/add-login.
+
 Environment:
   AMD_DIR       board directory name under the repository root (default: tasks)
+  AMD_TYPES     comma-separated type labels (default: conventional commits)
   AMD_YES       set to 1 to create a missing board without prompting
   AMD_NO_INPUT  set to 1 to never prompt (same as --no-input)
+  AMD_NO_BRANCH set to 1 to never create branches (same as --no-branch)
   EDITOR        editor used by `amd edit` (default: vi)
 
 Tasks are rendered from MiniJinja templates. `amd templates` lists them and
@@ -51,6 +60,9 @@ struct Cli {
     /// Never prompt; missing values are an error instead
     #[arg(long, global = true)]
     no_input: bool,
+    /// Plain text output instead of the rich board
+    #[arg(long, global = true)]
+    plain: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -67,10 +79,16 @@ enum Cmd {
         #[arg(default_value = "all", value_name = "COLUMN")]
         column: String,
     },
-    /// Move a task todo -> doing
+    /// Move a task todo -> doing, and switch to its branch
     Start {
         #[arg(value_name = "REF")]
         task: Option<String>,
+        /// Branch to create instead of the one in the ticket
+        #[arg(short, long, value_name = "NAME")]
+        branch: Option<String>,
+        /// Move the task without touching branches
+        #[arg(long)]
+        no_branch: bool,
     },
     /// Move a task doing -> done
     Done {
@@ -92,6 +110,16 @@ enum Cmd {
         #[arg(value_name = "REF")]
         task: Option<String>,
     },
+    /// List the epics on the board, or one epic's tasks
+    Epics {
+        #[arg(value_name = "EPIC")]
+        epic: Option<String>,
+    },
+    /// List the stories on the board, or one story's tasks
+    Stories {
+        #[arg(value_name = "STORY")]
+        story: Option<String>,
+    },
     /// Inspect and customise the task templates
     Templates {
         #[command(subcommand)]
@@ -104,6 +132,15 @@ struct NewArgs {
     /// Task title; omit it in a terminal to fill in the form
     #[arg(value_name = "TITLE")]
     title: Option<String>,
+    /// Type label: a conventional-commit type (feat, fix, docs, chore, …)
+    #[arg(long, value_name = "TYPE")]
+    r#type: Option<String>,
+    /// Epic label this task belongs to
+    #[arg(short = 'E', long, value_name = "EPIC")]
+    epic: Option<String>,
+    /// Story label this task belongs to
+    #[arg(short = 'S', long, value_name = "STORY")]
+    story: Option<String>,
     /// Tag to add (repeatable)
     #[arg(short = 't', long = "tag", value_name = "TAG")]
     tags: Vec<String>,
@@ -153,6 +190,7 @@ fn main() -> ExitCode {
 fn run() -> Result<()> {
     let cli = Cli::parse();
     form::set_no_input(cli.no_input);
+    render::set_plain(cli.plain);
     let command = cli.command.unwrap_or(Cmd::Board);
 
     // `init` is the one command that runs without an existing board.
@@ -169,9 +207,13 @@ fn run() -> Result<()> {
         Cmd::New(args) => cmd_new(&board, args),
         Cmd::Board => cmd_ls(&board, "all"),
         Cmd::Ls { column } => cmd_ls(&board, &column),
-        Cmd::Start { task } => {
+        Cmd::Start {
+            task,
+            branch,
+            no_branch,
+        } => {
             let task = resolve(&board, task, "start", &[Column::Todo])?;
-            board.move_task(&task, Column::Doing)
+            cmd_start(&board, &task, branch, no_branch)
         }
         Cmd::Done { task } => {
             let task = resolve(&board, task, "done", &[Column::Doing])?;
@@ -195,8 +237,117 @@ fn run() -> Result<()> {
             let task = resolve(&board, task, "edit", &Column::ALL)?;
             open_editor(&task.path)
         }
+        Cmd::Epics { epic } => cmd_label(&board, "epic", epic),
+        Cmd::Stories { story } => cmd_label(&board, "story", story),
         Cmd::Templates { command } => cmd_templates(&board, command.unwrap_or(TemplateCmd::List)),
     }
+}
+
+/// Move a task into doing/ and put the working tree on its branch.
+///
+/// Order matters: the `git mv` is staged first so it travels with the switch
+/// and lands on the task's own branch.
+fn cmd_start(
+    board: &Board,
+    task: &task::Task,
+    override_branch: Option<String>,
+    no_branch: bool,
+) -> Result<()> {
+    // Read the branch before the move — afterwards the path is stale.
+    let wanted = match override_branch {
+        Some(name) => Some(name),
+        None => match task.branch() {
+            Some(name) => Some(name),
+            // Older tasks (and custom templates) may carry only a type label.
+            None => match task.kind() {
+                Some(kind) => Some(branch::for_title(&kind, &task.title())?),
+                None => None,
+            },
+        },
+    };
+
+    board.move_task(task, Column::Doing)?;
+
+    if no_branch || std::env::var("AMD_NO_BRANCH").as_deref() == Ok("1") {
+        return Ok(());
+    }
+    let Some(name) = wanted else {
+        eprintln!("amd: no type or branch on this task; left the branch alone");
+        return Ok(());
+    };
+    branch::validate(&name)?;
+    if git::current_branch(&board.root).as_deref() == Some(name.as_str()) {
+        println!("already on {name}");
+        return Ok(());
+    }
+    let exists = git::branch_exists(&board.root, &name);
+    git::switch_branch(&board.root, &name, !exists)?;
+    println!("{} {name}", if exists { "switched to" } else { "branch" });
+    Ok(())
+}
+
+/// Ask for a grouping label, completing against the ones already in use.
+fn label(board: &Board, name: &str, given: Option<String>, full_form: bool) -> Result<String> {
+    match given {
+        Some(value) => Ok(value.trim().to_string()),
+        None if full_form => {
+            let known = board.label_values(name)?;
+            let message = format!("{}:", templates::field_label(name));
+            form::label(
+                &message,
+                "",
+                known,
+                "optional label grouping tasks; blank for none",
+            )
+        }
+        None => Ok(String::new()),
+    }
+}
+
+/// `amd epics` / `amd stories`: the index for a grouping label, or one
+/// value's tasks. Progress is counted from the columns, so it's always current.
+fn cmd_label(board: &Board, label: &str, value: Option<String>) -> Result<()> {
+    let tasks = board.tasks()?;
+    let of = |task: &task::Task| task.meta(label).filter(|value| !value.is_empty());
+
+    if let Some(value) = value {
+        let mut found = false;
+        for task in tasks
+            .iter()
+            .filter(|task| of(task).as_deref() == Some(&value))
+        {
+            found = true;
+            println!(
+                "  [{}] {} ({}/)",
+                task.id_display(),
+                task.title(),
+                task.column
+            );
+        }
+        if !found {
+            bail!("no tasks with {label} '{value}'");
+        }
+        return Ok(());
+    }
+
+    let values = board.label_values(label)?;
+    if values.is_empty() {
+        println!("(no {label}s — add one with: amd new \"…\" --{label} <name>)");
+        return Ok(());
+    }
+    let width = values.iter().map(String::len).max().unwrap_or(0);
+    for value in values {
+        let mine: Vec<&task::Task> = tasks
+            .iter()
+            .filter(|task| of(task).as_deref() == Some(value.as_str()))
+            .collect();
+        let done = mine
+            .iter()
+            .filter(|task| task.column == Column::Done)
+            .count();
+        println!("{value:width$}  {done}/{} done", mine.len());
+    }
+    Ok(())
 }
 
 /// Resolve a task reference, or offer a picker when it was left out.
@@ -243,10 +394,27 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
         args.template.clone()
     };
 
+    // The type label doubles as the branch prefix, so it's asked first: the
+    // title validator needs it to show the branch the title will produce.
+    let kind = match args.r#type {
+        Some(kind) => {
+            branch::validate_type(&kind)?;
+            kind
+        }
+        None if full_form => form::select("Type:", branch::types(), &branch::default_type())?,
+        None => branch::default_type(),
+    };
+
     let title = match args.title {
         Some(title) if !args.interactive => title,
-        title => form::required_text("Title:", title.as_deref())?,
+        title => form::title(&kind, title.as_deref())?,
     };
+    // Non-interactively this is where a title that can't become a branch stops.
+    branch::validate_title(&kind, &title)?;
+    let branch_name = branch::for_title(&kind, &title)?;
+
+    let epic = label(board, "epic", args.epic, full_form)?;
+    let story = label(board, "story", args.story, full_form)?;
 
     let tags = if full_form {
         form::tags(&args.tags.join(", "), board.tags()?)?
@@ -289,6 +457,10 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
         number,
         title,
         slug: slug.clone(),
+        kind,
+        epic,
+        story,
+        branch: branch_name.clone(),
         tags,
         created,
         timestamp,
@@ -302,7 +474,7 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
 
     let body = templates.render(&template, &context)?;
     fs::write(&path, body).with_context(|| format!("writing {}", path.display()))?;
-    println!("created {}/{id}-{slug}.md", Column::Todo);
+    println!("created {}/{id}-{slug}.md ({branch_name})", Column::Todo);
     if args.edit {
         open_editor(&path)?;
     }
@@ -311,28 +483,11 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
 
 fn cmd_ls(board: &Board, column: &str) -> Result<()> {
     if column.eq_ignore_ascii_case("all") {
-        for column in Column::ALL {
-            list_column(board, column)?;
-        }
-        return Ok(());
+        return render::columns(board, &Column::ALL);
     }
     let column = Column::parse(column)
         .with_context(|| format!("unknown column '{column}' (todo, doing, done or all)"))?;
-    list_column(board, column)
-}
-
-fn list_column(board: &Board, column: Column) -> Result<()> {
-    println!();
-    println!("{}", column.as_str().to_uppercase());
-    let tasks = board.tasks_in(column)?;
-    if tasks.is_empty() {
-        println!("  (empty)");
-        return Ok(());
-    }
-    for task in tasks {
-        println!("  [{}] {}", task.id_display(), task.title());
-    }
-    Ok(())
+    render::columns(board, &[column])
 }
 
 fn cmd_templates(board: &Board, command: TemplateCmd) -> Result<()> {

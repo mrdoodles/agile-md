@@ -23,7 +23,11 @@ MiniJinja templates**.
 - `src/templates.rs` — the MiniJinja `Environment`, built-in templates, board
   overrides, `TaskContext`, `required_extras`.
 - `src/form.rs` — every interactive prompt, built on `inquire` (text, select,
-  confirm, task picker, tag autocomplete).
+  confirm, task picker, label autocomplete).
+- `src/branch.rs` — the label taxonomy: conventional-commit types, the
+  type -> branch-prefix map, and git ref-name validation.
+- `src/render.rs` — board output: rich tables (`richrs`) on a terminal, plain
+  greppable text everywhere else.
 - `src/git.rs` — thin wrappers over the `git` CLI (`rev-parse`, `ls-files`,
   `mv`, `config`).
 - `templates/*.md.jinja` — the built-in templates, `include_str!`'d into the
@@ -53,8 +57,41 @@ MiniJinja templates**.
   board, it prompts to create one when interactive (`stdin().is_terminal()`),
   auto-creates when `AMD_YES=1`, and otherwise errors (never hangs
   non-interactively).
-- Env vars: `AMD_DIR` (board dir name, default `tasks`), `AMD_YES` (force-create),
-  `AMD_NO_INPUT` (never prompt), `EDITOR` (for `amd edit`).
+- Env vars: `AMD_DIR` (board dir name, default `tasks`), `AMD_TYPES` (type
+  labels), `AMD_YES` (force-create), `AMD_NO_INPUT` (never prompt),
+  `AMD_NO_BRANCH` (never touch branches), `NO_COLOR`/`--plain` (plain board),
+  `EDITOR` (for `amd edit`).
+
+## Labels and branches (`src/branch.rs`)
+
+- **One ticket kind, three labels**: `type` (required), `epic` and `story`
+  (optional groupings, indexed by `amd epics` / `amd stories`), plus free tags.
+- `type` values are **conventional-commit** types (`feat`, `fix`, `docs`, …);
+  branches use the **branch** convention (`feature/`, `bugfix/`, `hotfix/`,
+  `chore/`). `prefix()` maps between them, matching the two lists in
+  mrdoodles/conventional-validator — so commits *and* branches validate.
+  `AMD_TYPES` overrides the accepted types; an entry that is already a branch
+  prefix keeps its own name.
+- `amd start` moves the task and then switches to its branch. **Order matters**:
+  `git mv` is staged first so the rename travels with the switch and lands on
+  the task's branch. The branch is read from the ticket's `branch:` frontmatter
+  (written at creation, so it's editable), then `--branch`, then type + title.
+- Titles are validated against git's ref rules at creation — the title becomes
+  the branch, so a title with nothing sluggable in it is rejected up front
+  rather than yielding a ticket that can never start. `slugify` returns an
+  empty string in that case; callers must reject it.
+
+## Board rendering (`src/render.rs`)
+
+- Rich tables only when stdout is a terminal and neither `--plain` nor
+  `NO_COLOR` is set; otherwise the plain `  [id] title  (labels)` form, which
+  is what `tests/test.sh` asserts on and what pipes into `grep`.
+- `richrs` sizes its borders from header widths, so setting `Column::min_width`
+  produces borders that don't match the rows. Cells are therefore padded and
+  ellipsised here (`fit()`) before being handed over — which also lines the
+  three column tables up with each other.
+- A rendering failure falls back to plain output rather than erroring: never
+  let cosmetics stop someone seeing the board.
 
 ## Forms (`src/form.rs`)
 
@@ -63,7 +100,7 @@ MiniJinja templates**.
   Non-interactively a missing value is an error with the usage line — the same
   contract the bash version had, and why the tool never hangs in CI.
 - Optional arguments drive it: `amd new` with no title runs the full form
-  (template select, title, tags), `-i` re-asks for what was passed, and
+  (template, type, title, epic, story, tags), `-i` re-asks for what was passed, and
   `start`/`done`/`back`/`show`/`edit` with no `<ref>` open a task picker
   scoped to the columns that command can act on.
 - **The form is derived from the template**: `templates::required_extras()`
@@ -77,7 +114,7 @@ MiniJinja templates**.
 
 ## Templates (the reason this is Rust)
 
-- Built-ins are compiled in via `include_str!` (`task`, `bug`, `board-readme`).
+- Built-ins are compiled in via `include_str!` (`task`, `board-readme`).
   Anything in `<board>/templates/<name>.md.jinja` overrides or adds to them;
   `amd templates eject <name>` writes an editable copy there.
 - The environment is deliberately configured: `UndefinedBehavior::Strict` (a
@@ -86,9 +123,9 @@ MiniJinja templates**.
 - Custom `yaml` filter quotes/escapes frontmatter values, so a title containing
   `"` can't corrupt the block. Use it for every frontmatter value.
 - `TaskContext` is the contract with templates (`id`, `number`, `title`, `slug`,
-  `tags`, `created`, `timestamp`, `column`, `author`, `email`, `board`,
-  `template`, `extra`). Adding a field is additive; renaming one breaks every
-  user template — treat it as a public API.
+  `type`, `epic`, `story`, `branch`, `tags`, `created`, `timestamp`, `column`,
+  `author`, `email`, `board`, `template`, `extra`). Adding a field is additive;
+  renaming one breaks every user template — treat it as a public API.
 - Template errors are flattened by `render_error()` (message + line + cause
   chain + MiniJinja debug info); without that only the top line survives.
 
@@ -130,8 +167,11 @@ changes):
 - **v3** — command renamed `task` → **`amd`**; env `TASK_YES`/`TASKS_DIR` →
   `AMD_YES`/`AMD_DIR`.
 - **v4** — bash script → **Rust binary**; tasks rendered from MiniJinja
-  templates; install downloads a prebuilt binary instead of copying a script.
-  Same CLI, same board layout, same file format — v3 boards work unchanged.
+  templates; `inquire` forms when a value is missing; `type`/`epic`/`story`
+  labels with branch creation on `amd start`; rich board output. Install
+  downloads a prebuilt binary instead of copying a script. The v3 CLI and board
+  layout still work; v3 task files simply have no labels, so `amd start` on one
+  leaves the branch alone.
 
 ## Conventions
 

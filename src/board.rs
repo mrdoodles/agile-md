@@ -190,6 +190,22 @@ impl Board {
         Ok(tags)
     }
 
+    /// Every value in use for a grouping label (`epic`, `story`), sorted —
+    /// suggestions for the next task, and the index behind `amd epics`.
+    pub fn label_values(&self, label: &str) -> Result<Vec<String>> {
+        let mut values: Vec<String> = Vec::new();
+        for task in self.tasks()? {
+            let Some(value) = task.meta(label).filter(|value| !value.is_empty()) else {
+                continue;
+            };
+            if !values.contains(&value) {
+                values.push(value);
+            }
+        }
+        values.sort();
+        Ok(values)
+    }
+
     /// Next id: one past the highest on the board, so ids are stable and never
     /// reused as tasks move between columns.
     pub fn next_id(&self) -> Result<u32> {

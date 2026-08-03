@@ -12,6 +12,9 @@ no daemon, no database.
   is consistent by construction and yours to change.
 - **The template is the form.** Leave an argument out in a terminal and `amd`
   asks — including the fields your own template declares.
+- **Labels, not ticket types.** One kind of ticket, labelled with a
+  conventional-commit `type` plus optional `epic` and `story`. The type is the
+  branch prefix, so `amd start` puts you on `feature/add-login`.
 - **One command, any repo.** Install `amd` once on your PATH; it finds the
   board at `<repository-root>/tasks` from wherever you are.
 
@@ -37,17 +40,53 @@ In any git repository:
 
 ```bash
 amd init                          # scaffold tasks/{todo,doing,done} here
-amd new "Publish to Marketplace" -t release
+amd new "Publish to Marketplace" --type feat --epic launch
 amd board                         # show all columns (the default)
-amd start 1                       # todo  -> doing
+amd start 1                       # todo -> doing, and switch to feature/publish-to-marketplace
 amd done  1                       # doing -> done
 amd back  1                       # move one column left
 amd show  publish                 # print a task (id or slug substring)
 amd edit  1                       # open in $EDITOR
+amd epics                         # epics with progress; amd stories does the same
 ```
 
 `amd` works from any subdirectory — it resolves the board from the repo root.
 Set `AMD_DIR` to use a board directory other than `tasks`.
+
+## Labels and branches
+
+There is one kind of ticket. What varies is its labels:
+
+| Label   | Required | Values                                                            |
+| ------- | -------- | ----------------------------------------------------------------- |
+| `type`  | yes      | conventional-commit types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert` (default `feat`; override the list with `AMD_TYPES`) |
+| `epic`  | no       | anything — groups tasks across a body of work (`amd epics`)        |
+| `story` | no       | anything — groups tasks within an epic (`amd stories`)             |
+| `tags`  | no       | free-form, completed against the tags already on the board         |
+
+The **type decides the branch**. Ticket types are *commit* types, branches
+follow the *branch* convention, and `amd` maps between them — so both halves
+satisfy [conventional-validator](https://github.com/mrdoodles/conventional-validator):
+
+| type                                            | branch prefix |
+| ----------------------------------------------- | ------------- |
+| `feat`                                          | `feature/`    |
+| `fix`                                           | `bugfix/`     |
+| `revert`                                        | `hotfix/`     |
+| `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore` | `chore/`      |
+
+```bash
+amd new "Add login" --type feat        # created todo/001-add-login.md (feature/add-login)
+amd start 1                            # moves the task and switches to feature/add-login
+amd start 1 --branch spike/try-it      # …or a branch you name
+amd start 1 --no-branch                # …or none at all (AMD_NO_BRANCH=1 for good)
+```
+
+The branch name is written into the ticket's frontmatter at creation, so you
+can see it — and edit it — before any work starts. Because the title becomes a
+branch, it's **validated against git's ref rules** when the task is created: a
+title with nothing sluggable in it is rejected at the prompt rather than
+producing a ticket that can never start.
 
 ## Forms
 
@@ -55,7 +94,7 @@ Every argument is optional in a terminal. Leave it out and you get a prompt
 ([inquire](https://github.com/mikaelmello/inquire)) instead of a usage error:
 
 ```bash
-amd new              # template picker, title, tags (tab-completes existing tags)
+amd new              # type, title, epic, story, tags (all tab-complete)
 amd new "Ship it" -i # same form, pre-filled with what you passed
 amd start            # pick from the tasks in todo/
 amd done             # pick from the tasks in doing/
@@ -79,13 +118,13 @@ hand, so a ticket can't come out half-formatted:
 amd templates                     # what's available, and where it comes from
 amd templates show task           # print the source
 amd templates eject task          # copy it to tasks/templates/ to edit
-amd new "Crash on save" -T bug    # use a different template
+amd new "Crash on save" -T story  # use a different template
 amd new "Ship it" -s owner=tim    # extra variables, as extra.owner
 ```
 
 Anything in `<board>/templates/<name>.md.jinja` overrides a built-in of the same
 name or adds a new one, so a repo can carry its own ticket format with no tool
-changes. Built-ins: `task`, `bug`, and `board-readme` (used by `amd init`).
+changes. Built-ins: `task` and `board-readme` (used by `amd init`).
 
 **A template that uses `extra.<name>` gets asked for it.** There's no second
 place to register fields — write this in `tasks/templates/story.md.jinja`:
@@ -111,6 +150,10 @@ Variables available in a task template:
 | `number`    | `7`                         |
 | `title`     | `Publish to Marketplace`    |
 | `slug`      | `publish-to-marketplace`    |
+| `type`      | `feat`                      |
+| `epic`      | `launch` (or empty)         |
+| `story`     | `guest-checkout` (or empty) |
+| `branch`    | `feature/publish-to-marketplace` |
 | `tags`      | `["release"]`               |
 | `created`   | `2026-08-03`                |
 | `timestamp` | `2026-08-03T09:12:44+01:00` |
@@ -134,6 +177,10 @@ Each task is `tasks/todo/NNN-slug.md`, from the built-in `task` template:
 ---
 id: "001"
 title: "Publish to Marketplace"
+type: "feat"
+epic: "launch"
+story: ""
+branch: "feature/publish-to-marketplace"
 created: "2026-08-01"
 tags: [release]
 ---
@@ -149,6 +196,25 @@ tags: [release]
 The `NNN` id is assigned in creation order and gives a stable default ordering.
 Commit task moves like any other change — the `git mv` is the record of the
 transition. Tasks can reference each other with `[[NNN-slug]]` wikilinks.
+
+## The board
+
+In a terminal `amd board` draws with [richrs](https://crates.io/crates/richrs) —
+bordered tables, a colour per column, counts and labels:
+
+```
+                         TODO  (2)
+┌─────┬──────────────────┬────────────────────────────────┐
+│ id  │ task             │ labels                         │
+├─────┼──────────────────┼────────────────────────────────┤
+│ 002 │ Crash on save    │ fix epic:checkout              │
+│ 003 │ Update the guide │ docs                           │
+└─────┴──────────────────┴────────────────────────────────┘
+```
+
+Piped or redirected output stays plain text (`  [002] Crash on save  (fix …)`),
+so `amd board | grep` keeps working and log files don't fill with box-drawing
+characters. `--plain` or `NO_COLOR=1` forces that everywhere.
 
 ## Why a directory instead of one big TODO.md?
 

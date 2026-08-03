@@ -15,6 +15,7 @@ use inquire::autocompletion::{Autocomplete, Replacement};
 use inquire::validator::Validation;
 use inquire::{Confirm, CustomUserError, InquireError, Select, Text};
 
+use crate::branch;
 use crate::task::Task;
 
 static NO_INPUT: OnceLock<bool> = OnceLock::new();
@@ -47,19 +48,38 @@ pub fn text(message: &str, default: Option<&str>, help: Option<&str>) -> Result<
     convert(prompt.prompt())
 }
 
-/// A free-text answer that can't be left blank.
-pub fn required_text(message: &str, default: Option<&str>) -> Result<String> {
-    let mut prompt = Text::new(message).with_validator(|input: &str| {
-        if input.trim().is_empty() {
-            Ok(Validation::Invalid("this one is required".into()))
-        } else {
-            Ok(Validation::Valid)
-        }
-    });
+/// The task title. Validated as you type against the branch-name rules, since
+/// the title becomes `<type>/<slug>` — better to catch it here than to leave a
+/// ticket that can never start.
+pub fn title(kind: &str, default: Option<&str>) -> Result<String> {
+    let help = format!("becomes the branch {kind}/<title>");
+    let kind = kind.to_string();
+    let mut prompt =
+        Text::new("Title:")
+            .with_help_message(&help)
+            .with_validator(move |input: &str| {
+                Ok(match branch::validate_title(&kind, input) {
+                    Ok(()) => Validation::Valid,
+                    Err(err) => Validation::Invalid(err.to_string().into()),
+                })
+            });
     if let Some(default) = default {
         prompt = prompt.with_initial_value(default);
     }
     Ok(convert(prompt.prompt())?.trim().to_string())
+}
+
+/// A single label, completing against the ones already on the board. Empty
+/// means "no label".
+pub fn label(message: &str, default: &str, known: Vec<String>, help: &str) -> Result<String> {
+    let answer = convert(
+        Text::new(message)
+            .with_initial_value(default)
+            .with_help_message(help)
+            .with_autocomplete(Completer::single(known))
+            .prompt(),
+    )?;
+    Ok(answer.trim().to_string())
 }
 
 /// Pick one of `options`, starting on `default` when it's among them.
@@ -84,7 +104,7 @@ pub fn tags(default: &str, known: Vec<String>) -> Result<Vec<String>> {
         Text::new("Tags:")
             .with_initial_value(default)
             .with_help_message(&help)
-            .with_autocomplete(TagAutocomplete { known })
+            .with_autocomplete(Completer::multi(known))
             .prompt(),
     )?;
     Ok(answer
@@ -94,30 +114,50 @@ pub fn tags(default: &str, known: Vec<String>) -> Result<Vec<String>> {
         .collect())
 }
 
-/// Completes the tag being typed after the last comma, leaving earlier ones
-/// alone.
+/// Completes a label against the ones already on the board. In `multi` mode it
+/// completes the value after the last comma, leaving earlier ones alone.
 #[derive(Clone)]
-struct TagAutocomplete {
+struct Completer {
     known: Vec<String>,
+    multi: bool,
 }
 
-impl TagAutocomplete {
+impl Completer {
+    fn single(known: Vec<String>) -> Self {
+        Self {
+            known,
+            multi: false,
+        }
+    }
+
+    fn multi(known: Vec<String>) -> Self {
+        Self { known, multi: true }
+    }
+
+    fn split(&self, input: &str) -> (String, String) {
+        if self.multi {
+            split_last_value(input)
+        } else {
+            (String::new(), input.to_string())
+        }
+    }
+
     fn matches(&self, partial: &str) -> Vec<&String> {
         let partial = partial.to_lowercase();
         self.known
             .iter()
-            .filter(|tag| tag.to_lowercase().starts_with(&partial))
+            .filter(|value| value.to_lowercase().starts_with(&partial))
             .collect()
     }
 }
 
-impl Autocomplete for TagAutocomplete {
+impl Autocomplete for Completer {
     fn get_suggestions(&mut self, input: &str) -> Result<Vec<String>, CustomUserError> {
-        let (prefix, partial) = split_last_tag(input);
+        let (prefix, partial) = self.split(input);
         Ok(self
             .matches(&partial)
             .into_iter()
-            .map(|tag| format!("{prefix}{tag}"))
+            .map(|value| format!("{prefix}{value}"))
             .collect())
     }
 
@@ -129,16 +169,16 @@ impl Autocomplete for TagAutocomplete {
         if let Some(suggestion) = highlighted {
             return Ok(Replacement::Some(suggestion));
         }
-        let (prefix, partial) = split_last_tag(input);
+        let (prefix, partial) = self.split(input);
         Ok(self
             .matches(&partial)
             .first()
-            .map(|tag| format!("{prefix}{tag}")))
+            .map(|value| format!("{prefix}{value}")))
     }
 }
 
 /// `"docs, rel"` -> `("docs, ", "rel")`.
-fn split_last_tag(input: &str) -> (String, String) {
+fn split_last_value(input: &str) -> (String, String) {
     match input.rfind(',') {
         Some(comma) => (
             format!("{} ", &input[..=comma]),
@@ -194,20 +234,18 @@ fn convert<T>(result: Result<T, InquireError>) -> Result<T> {
 mod tests {
     use super::*;
 
-    fn autocomplete() -> TagAutocomplete {
-        TagAutocomplete {
-            known: vec!["docs".into(), "release".into(), "regression".into()],
-        }
+    fn autocomplete() -> Completer {
+        Completer::multi(vec!["docs".into(), "release".into(), "regression".into()])
     }
 
     #[test]
-    fn split_last_tag_keeps_the_tags_already_typed() {
+    fn split_last_value_keeps_the_tags_already_typed() {
         assert_eq!(
-            split_last_tag("docs, rel"),
+            split_last_value("docs, rel"),
             ("docs, ".to_string(), "rel".to_string())
         );
-        assert_eq!(split_last_tag("rel"), (String::new(), "rel".to_string()));
-        assert_eq!(split_last_tag(""), (String::new(), String::new()));
+        assert_eq!(split_last_value("rel"), (String::new(), "rel".to_string()));
+        assert_eq!(split_last_value(""), (String::new(), String::new()));
     }
 
     #[test]

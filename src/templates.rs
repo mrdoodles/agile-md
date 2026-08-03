@@ -34,7 +34,6 @@ const BOARD_README: &str = "board-readme";
 
 const BUILTINS: &[(&str, &str)] = &[
     ("task", include_str!("../templates/task.md.jinja")),
-    ("bug", include_str!("../templates/bug.md.jinja")),
     (
         BOARD_README,
         include_str!("../templates/board-readme.md.jinja"),
@@ -66,6 +65,15 @@ pub struct TaskContext {
     pub number: u32,
     pub title: String,
     pub slug: String,
+    /// Type label — also the branch prefix (`feature`, `bugfix`, …).
+    #[serde(rename = "type")]
+    pub kind: String,
+    /// Epic label, or an empty string.
+    pub epic: String,
+    /// Story label, or an empty string.
+    pub story: String,
+    /// Branch this task will get on `amd start`, e.g. `feature/add-login`.
+    pub branch: String,
     pub tags: Vec<String>,
     /// Local date, `YYYY-MM-DD`.
     pub created: String,
@@ -196,6 +204,7 @@ pub fn render_board_readme(board: &Board) -> Result<String> {
         context! {
             board => board.name(),
             columns => columns,
+            types => crate::branch::types(),
             created => today().0,
         },
     )
@@ -343,6 +352,10 @@ mod tests {
             number: 1,
             title: "First task".to_string(),
             slug: "first-task".to_string(),
+            kind: "feat".to_string(),
+            epic: "checkout".to_string(),
+            story: "guest-checkout".to_string(),
+            branch: "feature/first-task".to_string(),
             tags: vec!["x".to_string(), "y".to_string()],
             created: "2026-08-03".to_string(),
             timestamp: "2026-08-03T09:00:00+01:00".to_string(),
@@ -361,6 +374,16 @@ mod tests {
         assert!(rendered.starts_with("---\n"), "{rendered}");
         assert!(rendered.contains("\nid: \"001\"\n"), "{rendered}");
         assert!(rendered.contains("\ntitle: \"First task\"\n"), "{rendered}");
+        assert!(rendered.contains("\ntype: \"feat\"\n"), "{rendered}");
+        assert!(rendered.contains("\nepic: \"checkout\"\n"), "{rendered}");
+        assert!(
+            rendered.contains("\nstory: \"guest-checkout\"\n"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("\nbranch: \"feature/first-task\"\n"),
+            "{rendered}"
+        );
         assert!(rendered.contains("\ntags: [x,y]\n"), "{rendered}");
         assert!(rendered.contains("## Checklist"), "{rendered}");
         assert!(rendered.ends_with('\n'), "{rendered}");
@@ -464,7 +487,6 @@ mod tests {
         let templates = Templates::builtin().unwrap();
         let names = templates.task_templates();
         assert!(names.contains(&"task".to_string()));
-        assert!(names.contains(&"bug".to_string()));
         assert!(!names.contains(&BOARD_README.to_string()));
     }
 

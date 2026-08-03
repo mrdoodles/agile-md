@@ -62,6 +62,27 @@ impl Task {
             .filter(|title| !title.is_empty())
             .unwrap_or_else(|| self.stem.clone())
     }
+
+    /// The `type` label, if the task carries one.
+    pub fn kind(&self) -> Option<String> {
+        self.meta("type").filter(|kind| !kind.is_empty())
+    }
+
+    /// The `epic` label, if the task carries one.
+    pub fn epic(&self) -> Option<String> {
+        self.meta("epic").filter(|epic| !epic.is_empty())
+    }
+
+    /// The `story` label, if the task carries one.
+    pub fn story(&self) -> Option<String> {
+        self.meta("story").filter(|story| !story.is_empty())
+    }
+
+    /// The branch this task should be worked on, as recorded when it was
+    /// created. Editing the ticket's `branch:` changes where `amd start` goes.
+    pub fn branch(&self) -> Option<String> {
+        self.meta("branch").filter(|branch| !branch.is_empty())
+    }
 }
 
 /// Search a task's frontmatter block (or, if it has none, the whole file) for
@@ -119,11 +140,7 @@ pub fn slugify(title: &str) -> String {
     while slug.ends_with('-') {
         slug.pop();
     }
-    if slug.is_empty() {
-        "task".to_string()
-    } else {
-        slug
-    }
+    slug
 }
 
 #[cfg(test)]
@@ -148,9 +165,10 @@ mod tests {
     }
 
     #[test]
-    fn slugify_never_returns_empty() {
-        assert_eq!(slugify("***"), "task");
-        assert_eq!(slugify(""), "task");
+    fn slugify_is_empty_when_nothing_survives() {
+        // The caller rejects these — an empty slug can't make a branch name.
+        assert_eq!(slugify("***"), "");
+        assert_eq!(slugify(""), "");
     }
 
     #[test]
