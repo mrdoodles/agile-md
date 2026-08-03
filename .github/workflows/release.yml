@@ -1,0 +1,21 @@
+name: Release
+
+# Tag a release (git tag -a vX.Y.Z && git push --tags) and this builds `amd`
+# for every platform, then attaches amd-<target>.zip to the GitHub Release —
+# which is what install.sh downloads.
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    uses: mrdoodles/rust-release/.github/workflows/rust-release.yml@v1
+    with:
+      platforms: "linux macos"
+      architectures: "x86_64 aarch64"
+      bin-name: amd
+      upload-to-release: true
+    secrets: inherit

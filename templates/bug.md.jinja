@@ -1,0 +1,29 @@
+---
+id: {{ id | yaml }}
+title: {{ title | yaml }}
+created: {{ created | yaml }}
+tags: [{{ tags | join(",") }}]
+type: bug
+reported-by: {{ author | yaml }}
+---
+
+## Summary
+
+{{ title }}
+
+## Steps to reproduce
+
+1.
+2.
+
+## Expected
+
+
+## Actual
+
+
+## Fix
+
+- [ ] Reproduce with a failing test
+- [ ] Fix
+- [ ] Verify the test passes
