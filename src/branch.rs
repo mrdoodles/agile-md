@@ -4,6 +4,8 @@
 //!
 //! - `type` — a conventional-commit type (`feat`, `fix`, `docs`, …). Required,
 //!   defaults to `feat`. It decides the branch prefix.
+//! - `scope` — what kind of work it is. Required, defaults to `code`. Only
+//!   `code` work gets a branch: an `admin` ticket has nothing to check out.
 //! - `epic` — optional, groups tasks across a body of work.
 //! - `story` — optional, groups tasks within an epic.
 //!
@@ -31,6 +33,50 @@ const PREFIXES: [(&str, &str); 3] = [("feat", "feature"), ("fix", "bugfix"), ("r
 
 /// Fallback branch prefix for types with no specific mapping.
 const DEFAULT_PREFIX: &str = "chore";
+
+/// Scopes every board understands. `AGILE_MD_SCOPES` adds to this list rather
+/// than replacing it, so `code` and `admin` are always available.
+pub const DEFAULT_SCOPES: [&str; 2] = ["code", "admin"];
+
+/// The scope a task gets when `--scope` isn't given — and the only one that
+/// produces a branch.
+pub const DEFAULT_SCOPE: &str = "code";
+
+/// The scopes this board accepts: the built-in ones plus anything in
+/// `AGILE_MD_SCOPES` (comma or space separated).
+pub fn scopes() -> Vec<String> {
+    let mut scopes: Vec<String> = DEFAULT_SCOPES
+        .iter()
+        .map(|scope| (*scope).to_string())
+        .collect();
+    if let Ok(raw) = env::var("AGILE_MD_SCOPES") {
+        for scope in raw.split([',', ' ']) {
+            let scope = scope.trim();
+            if !scope.is_empty() && !scopes.iter().any(|known| known == scope) {
+                scopes.push(scope.to_string());
+            }
+        }
+    }
+    scopes
+}
+
+/// Check a scope against the accepted list.
+pub fn validate_scope(scope: &str) -> Result<()> {
+    let scopes = scopes();
+    if scopes.iter().any(|known| known == scope) {
+        return Ok(());
+    }
+    bail!(
+        "unknown scope '{scope}' (expected one of: {}; set AGILE_MD_SCOPES to add more)",
+        scopes.join(", ")
+    )
+}
+
+/// Does work in this scope get a branch? Only code does — there is nothing to
+/// check out for an admin task, and an empty branch on the board is noise.
+pub fn scope_creates_branch(scope: &str) -> bool {
+    scope == DEFAULT_SCOPE
+}
 
 /// The type labels this board accepts.
 pub fn types() -> Vec<String> {
@@ -155,6 +201,18 @@ pub fn validate_title(kind: &str, title: &str) -> Result<()> {
     for_title(kind, title).map(|_| ())
 }
 
+/// The weaker check for scopes that get no branch: the title still has to make
+/// a filename.
+pub fn validate_sluggable(title: &str) -> Result<()> {
+    if title.trim().is_empty() {
+        bail!("a title is required");
+    }
+    if task::slugify(title).is_empty() {
+        bail!("title '{title}' has no letters or numbers to build a filename from");
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -220,6 +278,30 @@ mod tests {
         for good in ["feature/add-login", "hotfix/001-fix", "chore/deps"] {
             assert!(validate(good).is_ok(), "{good:?} should be accepted");
         }
+    }
+
+    #[test]
+    fn only_code_scope_gets_a_branch() {
+        assert!(scope_creates_branch("code"));
+        assert!(!scope_creates_branch("admin"));
+        assert!(!scope_creates_branch("docs"));
+    }
+
+    #[test]
+    fn the_default_scopes_are_code_and_admin() {
+        assert_eq!(scopes(), DEFAULT_SCOPES);
+        assert_eq!(DEFAULT_SCOPE, "code");
+        assert!(validate_scope("admin").is_ok());
+        let err = validate_scope("nope").unwrap_err().to_string();
+        assert!(err.contains("unknown scope 'nope'"), "{err}");
+        assert!(err.contains("AGILE_MD_SCOPES"), "{err}");
+    }
+
+    #[test]
+    fn titles_for_unbranched_scopes_only_need_a_filename() {
+        assert!(validate_sluggable("Update the rota").is_ok());
+        assert!(validate_sluggable("***").is_err());
+        assert!(validate_sluggable("  ").is_err());
     }
 
     #[test]

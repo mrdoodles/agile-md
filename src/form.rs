@@ -51,17 +51,25 @@ pub fn text(message: &str, default: Option<&str>, help: Option<&str>) -> Result<
     convert(prompt.prompt())
 }
 
-/// The task title. Validated as you type against the branch-name rules, since
-/// the title becomes `<type>/<slug>` — better to catch it here than to leave a
-/// ticket that can never start.
-pub fn title(kind: &str, default: Option<&str>) -> Result<String> {
-    let help = format!("becomes the branch {kind}/<title>");
-    let kind = kind.to_string();
+/// The task title. When the task will get a branch, it's validated as you type
+/// against the branch-name rules — the title becomes `<prefix>/<slug>`, so it's
+/// better caught here than left as a ticket that can never start. Scopes
+/// without branches only need a title that makes a filename.
+pub fn title(kind: Option<&str>, default: Option<&str>) -> Result<String> {
+    let help = match kind {
+        Some(kind) => format!("becomes the branch {}/<title>", branch::prefix(kind)),
+        None => "becomes the task's file name".to_string(),
+    };
+    let kind = kind.map(str::to_string);
     let mut prompt =
         Text::new("Title:")
             .with_help_message(&help)
             .with_validator(move |input: &str| {
-                Ok(match branch::validate_title(&kind, input) {
+                let checked = match &kind {
+                    Some(kind) => branch::validate_title(kind, input),
+                    None => branch::validate_sluggable(input),
+                };
+                Ok(match checked {
                     Ok(()) => Validation::Valid,
                     Err(err) => Validation::Invalid(err.to_string().into()),
                 })

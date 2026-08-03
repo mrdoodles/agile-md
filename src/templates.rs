@@ -68,11 +68,15 @@ pub struct TaskContext {
     /// Type label — also the branch prefix (`feature`, `bugfix`, …).
     #[serde(rename = "type")]
     pub kind: String,
+    /// Scope label: what kind of work this is (`code`, `admin`, …). Only code
+    /// scope gets a branch.
+    pub scope: String,
     /// Epic label, or an empty string.
     pub epic: String,
     /// Story label, or an empty string.
     pub story: String,
     /// Branch this task will get on `amd start`, e.g. `feature/add-login`.
+    /// Empty for scopes that don't use branches.
     pub branch: String,
     pub tags: Vec<String>,
     /// Local date, `YYYY-MM-DD`.
@@ -353,6 +357,7 @@ mod tests {
             title: "First task".to_string(),
             slug: "first-task".to_string(),
             kind: "feat".to_string(),
+            scope: "code".to_string(),
             epic: "checkout".to_string(),
             story: "guest-checkout".to_string(),
             branch: "feature/first-task".to_string(),
@@ -375,6 +380,7 @@ mod tests {
         assert!(rendered.contains("\nid: \"001\"\n"), "{rendered}");
         assert!(rendered.contains("\ntitle: \"First task\"\n"), "{rendered}");
         assert!(rendered.contains("\ntype: \"feat\"\n"), "{rendered}");
+        assert!(rendered.contains("\nscope: \"code\"\n"), "{rendered}");
         assert!(rendered.contains("\nepic: \"checkout\"\n"), "{rendered}");
         assert!(
             rendered.contains("\nstory: \"guest-checkout\"\n"),

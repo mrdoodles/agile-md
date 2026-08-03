@@ -154,6 +154,8 @@ fn border_style(column: Column) -> Style {
 fn labels(task: &Task) -> String {
     [
         task.kind(),
+        task.scope()
+            .filter(|scope| scope != crate::branch::DEFAULT_SCOPE),
         task.epic().map(|epic| format!("epic:{epic}")),
         task.story().map(|story| format!("story:{story}")),
     ]

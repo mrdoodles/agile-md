@@ -60,11 +60,25 @@ There is one kind of ticket. What varies is its labels:
 | Label   | Required | Values                                                            |
 | ------- | -------- | ----------------------------------------------------------------- |
 | `type`  | yes      | conventional-commit types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert` (default `feat`; override the list with `AMD_TYPES`) |
+| `scope` | yes      | `code` (default) or `admin`; add more with `AGILE_MD_SCOPES`. Only `code` work gets a branch |
 | `epic`  | no       | anything — groups tasks across a body of work (`amd epics`)        |
 | `story` | no       | anything — groups tasks within an epic (`amd stories`)             |
 | `tags`  | no       | free-form, completed against the tags already on the board         |
 
-The **type decides the branch**. Ticket types are *commit* types, branches
+**Scope decides whether there's a branch at all**, and the **type decides what
+it's called**. An `admin` ticket — a rota, an approval, a meeting — is real work
+with nothing to check out, so it gets no branch and no empty `branch:` line:
+
+```bash
+amd new "Renew the certificates" --scope admin   # created todo/004-renew-the-certificates.md
+amd start 4                                      # moves it; "admin scope work doesn't use branches"
+AGILE_MD_SCOPES=docs,design amd new "Redraw the diagram" --scope design
+```
+
+`AGILE_MD_SCOPES` **adds** to the built-in scopes rather than replacing them, so
+`code` and `admin` are always available (unlike `AMD_TYPES`, which replaces).
+
+For code-scope work, the type decides the branch. Ticket types are *commit* types, branches
 follow the *branch* convention, and `amd` maps between them — so both halves
 satisfy [conventional-validator](https://github.com/mrdoodles/conventional-validator):
 
@@ -94,7 +108,7 @@ Every argument is optional in a terminal. Leave it out and you get a prompt
 ([inquire](https://github.com/mikaelmello/inquire)) instead of a usage error:
 
 ```bash
-amd new                # type, title, epic, story, tags, then the body in $EDITOR
+amd new                # type, scope, title, epic, story, tags, then the body in $EDITOR
 amd new "Ship it" -i   # same form, pre-filled with what you passed
 amd new "Ship it" -e   # straight to the body editor
 amd new "Ship it"      # one-liner, no editor (--no-edit forces this)
@@ -159,6 +173,7 @@ Variables available in a task template:
 | `title`     | `Publish to Marketplace`    |
 | `slug`      | `publish-to-marketplace`    |
 | `type`      | `feat`                      |
+| `scope`     | `code`                      |
 | `epic`      | `launch` (or empty)         |
 | `story`     | `guest-checkout` (or empty) |
 | `branch`    | `feature/publish-to-marketplace` |
@@ -186,6 +201,7 @@ Each task is `tasks/todo/NNN-slug.md`, from the built-in `task` template:
 id: "001"
 title: "Publish to Marketplace"
 type: "feat"
+scope: "code"
 epic: "launch"
 story: ""
 branch: "feature/publish-to-marketplace"

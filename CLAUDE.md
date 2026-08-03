@@ -58,14 +58,25 @@ MiniJinja templates**.
   auto-creates when `AMD_YES=1`, and otherwise errors (never hangs
   non-interactively).
 - Env vars: `AMD_DIR` (board dir name, default `tasks`), `AMD_TYPES` (type
-  labels), `AMD_YES` (force-create), `AMD_NO_INPUT` (never prompt),
+  labels), `AGILE_MD_SCOPES` (extra scope labels), `AMD_YES` (force-create), `AMD_NO_INPUT` (never prompt),
   `AMD_NO_BRANCH` (never touch branches), `NO_COLOR`/`--plain` (plain board),
   `EDITOR` (for `amd edit`).
 
 ## Labels and branches (`src/branch.rs`)
 
-- **One ticket kind, three labels**: `type` (required), `epic` and `story`
-  (optional groupings, indexed by `amd epics` / `amd stories`), plus free tags.
+- **One ticket kind, four labels**: `type` and `scope` (required), `epic` and
+  `story` (optional groupings, indexed by `amd epics` / `amd stories`), plus
+  free tags.
+- **`scope` decides whether there is a branch; `type` decides its name.**
+  `code` (the default) branches, everything else doesn't — an admin ticket has
+  nothing to check out, so it gets an empty `branch:` and `amd start` says why.
+  `AGILE_MD_SCOPES` *adds* to `code`/`admin` (note: `AMD_TYPES` *replaces*, and
+  this variable keeps the spelled-out prefix the ticket asked for).
+- Scope is settled before the title in the form, because the title's validation
+  depends on it: branch rules for code scope, "must make a filename" otherwise
+  (`branch::validate_sluggable`).
+- A task with no `scope` at all (created before scopes existed) keeps the old
+  behaviour and still branches.
 - `type` values are **conventional-commit** types (`feat`, `fix`, `docs`, …);
   branches use the **branch** convention (`feature/`, `bugfix/`, `hotfix/`,
   `chore/`). `prefix()` maps between them, matching the two lists in
@@ -132,7 +143,7 @@ MiniJinja templates**.
 - Custom `yaml` filter quotes/escapes frontmatter values, so a title containing
   `"` can't corrupt the block. Use it for every frontmatter value.
 - `TaskContext` is the contract with templates (`id`, `number`, `title`, `slug`,
-  `type`, `epic`, `story`, `branch`, `tags`, `created`, `timestamp`, `column`,
+  `type`, `scope`, `epic`, `story`, `branch`, `tags`, `created`, `timestamp`, `column`,
   `author`, `email`, `board`, `template`, `extra`). Adding a field is additive;
   renaming one breaks every user template — treat it as a public API.
 - Template errors are flattened by `render_error()` (message + line + cause

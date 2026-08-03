@@ -31,13 +31,15 @@ in a terminal and amd asks: `amd new` fills in a form, `amd start` offers a
 list of tasks to pick from.
 
 Every task carries labels: a type (feat, fix, docs, … — the conventional
-commit types) plus optional epic and story labels. The type decides the
-branch, so `amd start` on a feat titled \"Add login\" creates and switches to
-feature/add-login.
+commit types), a scope (code, admin, …) plus optional epic and story
+labels. The type decides the branch, so `amd start` on a code-scope feat
+titled \"Add login\" creates and switches to feature/add-login. Work in any
+other scope gets no branch.
 
 Environment:
   AMD_DIR       board directory name under the repository root (default: tasks)
   AMD_TYPES     comma-separated type labels (default: conventional commits)
+  AGILE_MD_SCOPES  extra scope labels, added to code and admin
   AMD_YES       set to 1 to create a missing board without prompting
   AMD_NO_INPUT  set to 1 to never prompt (same as --no-input)
   AMD_NO_BRANCH set to 1 to never create branches (same as --no-branch)
@@ -139,6 +141,10 @@ struct NewArgs {
     /// Type label: a conventional-commit type (feat, fix, docs, chore, …)
     #[arg(long, value_name = "TYPE")]
     r#type: Option<String>,
+    /// Scope label: what kind of work this is (code, admin, …). Only code
+    /// scope tasks get a branch
+    #[arg(long, value_name = "SCOPE")]
+    scope: Option<String>,
     /// Epic label this task belongs to
     #[arg(short = 'E', long, value_name = "EPIC")]
     epic: Option<String>,
@@ -260,9 +266,18 @@ fn cmd_start(
     override_branch: Option<String>,
     no_branch: bool,
 ) -> Result<()> {
-    // Read the branch before the move — afterwards the path is stale.
+    // Read everything off the ticket before the move — afterwards the path is
+    // stale. A scope that doesn't use branches wins over the type fallback,
+    // but an explicit --branch still wins over the scope.
+    let scope = task.scope();
+    let branched = scope
+        .as_deref()
+        .map(branch::scope_creates_branch)
+        // Tasks created before scopes existed keep the old behaviour.
+        .unwrap_or(true);
     let wanted = match override_branch {
         Some(name) => Some(name),
+        None if !branched => None,
         None => match task.branch() {
             Some(name) => Some(name),
             // Older tasks (and custom templates) may carry only a type label.
@@ -279,7 +294,10 @@ fn cmd_start(
         return Ok(());
     }
     let Some(name) = wanted else {
-        eprintln!("amd: no type or branch on this task; left the branch alone");
+        match scope.filter(|_| !branched) {
+            Some(scope) => eprintln!("amd: {scope} scope work doesn't use branches"),
+            None => eprintln!("amd: no type or branch on this task; left the branch alone"),
+        }
         return Ok(());
     };
     branch::validate(&name)?;
@@ -412,13 +430,34 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
         None => branch::default_type(),
     };
 
+    // Scope decides whether this task gets a branch at all, so it's settled
+    // before the title: the title's rules depend on the answer.
+    let scope = match args.scope {
+        Some(scope) => {
+            branch::validate_scope(&scope)?;
+            scope
+        }
+        None if full_form => form::select(
+            "Scope:",
+            branch::scopes(),
+            &branch::DEFAULT_SCOPE.to_string(),
+        )?,
+        None => branch::DEFAULT_SCOPE.to_string(),
+    };
+    let branched = branch::scope_creates_branch(&scope);
+
     let title = match args.title {
         Some(title) if !args.interactive => title,
-        title => form::title(&kind, title.as_deref())?,
+        title => form::title(branched.then_some(kind.as_str()), title.as_deref())?,
     };
-    // Non-interactively this is where a title that can't become a branch stops.
-    branch::validate_title(&kind, &title)?;
-    let branch_name = branch::for_title(&kind, &title)?;
+    // Non-interactively this is where an unusable title stops.
+    let branch_name = if branched {
+        branch::validate_title(&kind, &title)?;
+        branch::for_title(&kind, &title)?
+    } else {
+        branch::validate_sluggable(&title)?;
+        String::new()
+    };
 
     let epic = label(board, "epic", args.epic, full_form)?;
     let story = label(board, "story", args.story, full_form)?;
@@ -465,6 +504,7 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
         title,
         slug: slug.clone(),
         kind,
+        scope,
         epic,
         story,
         branch: branch_name.clone(),
@@ -493,7 +533,12 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
     };
 
     fs::write(&path, body).with_context(|| format!("writing {}", path.display()))?;
-    println!("created {}/{id}-{slug}.md ({branch_name})", Column::Todo);
+    let note = if branch_name.is_empty() {
+        String::new()
+    } else {
+        format!(" ({branch_name})")
+    };
+    println!("created {}/{id}-{slug}.md{note}", Column::Todo);
     Ok(())
 }
 
