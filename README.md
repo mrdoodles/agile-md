@@ -225,6 +225,23 @@ The `NNN` id is assigned in creation order and gives a stable default ordering.
 Commit task moves like any other change — the `git mv` is the record of the
 transition. Tasks can reference each other with `[[NNN-slug]]` wikilinks.
 
+## Shell completion
+
+```bash
+amd completions bash > /usr/local/etc/bash_completion.d/amd
+amd completions zsh  > "${fpath[1]}/_amd"          # then: rm -f ~/.zcompdump; compinit
+amd completions fish > ~/.config/fish/completions/amd.fish
+```
+
+`amd completions` with no argument works the shell out from `$SHELL`; elvish and
+powershell are available too. The script goes to stdout and the install hint to
+stderr, so redirecting gives you a clean file.
+
+Completion covers values, not just names — `amd new --type <TAB>` offers the
+change types this board accepts (including anything you added with `AMD_TYPES`),
+`-T <TAB>` the ticket types, `amd ls <TAB>` the columns. Scripts are generated
+from the CLI itself, so they can't drift from it.
+
 ## The board
 
 In a terminal `amd board` draws with [richrs](https://crates.io/crates/richrs) —

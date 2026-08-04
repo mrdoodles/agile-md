@@ -28,6 +28,10 @@ MiniJinja templates**.
   type -> branch-prefix map, and git ref-name validation.
 - `src/render.rs` — board output: rich tables (`richrs`) on a terminal, plain
   greppable text everywhere else.
+- `src/completions.rs` — `amd completions [SHELL]`, generated from the clap
+  command with `clap_complete`; `$SHELL` detection and install hints.
+- `src/value.rs` — `TypedValueParser`s that advertise their possible values, so
+  completions and `--help` list them while validation stays ours.
 - `src/git.rs` — thin wrappers over the `git` CLI (`rev-parse`, `ls-files`,
   `mv`, `config`).
 - `templates/*.md.jinja` — the built-in templates, `include_str!`'d into the
@@ -149,6 +153,23 @@ MiniJinja templates**.
   renaming one breaks every user template — treat it as a public API.
 - Template errors are flattened by `render_error()` (message + line + cause
   chain + MiniJinja debug info); without that only the top line survives.
+
+## Completions
+
+- Generated, never checked in: `amd completions <shell>` renders from
+  `Cli::command()`, so a new flag is completable the moment it exists. Handled
+  before `Board::ensure()` — it must work outside a repo, which is exactly when
+  people set completion up.
+- Value-level completion comes from `src/value.rs`. `TypedValueParser` lets a
+  parser advertise `possible_values()` (used by completions and `--help`) while
+  `parse_ref()` keeps our own validation and error text — `PossibleValuesParser`
+  alone would have replaced "unknown type 'x' … set AMD_TYPES" with clap's
+  wording. `TicketType` advertises the built-ins but accepts any name, since a
+  board can add templates.
+- `clap`'s `string` feature is on for `Str: From<String>`, which the runtime
+  value lists need.
+- The script goes to stdout, the install hint to stderr, so a redirect gives a
+  clean file. `tests/test.sh` runs `bash -n` over the generated bash script.
 
 ## Commands
 

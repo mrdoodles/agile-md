@@ -303,6 +303,15 @@ pub fn field_label(key: &str) -> String {
     }
 }
 
+/// The built-in ticket types, in the order they're offered.
+pub fn builtin_ticket_types() -> Vec<String> {
+    BUILTINS
+        .iter()
+        .map(|(name, _)| (*name).to_string())
+        .filter(|name| name != BOARD_README)
+        .collect()
+}
+
 /// The source of a built-in template, if `name` is one.
 pub fn builtin_source(name: &str) -> Option<&'static str> {
     BUILTINS

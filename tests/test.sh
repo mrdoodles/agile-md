@@ -192,6 +192,29 @@ echo "quoting:"
 assert "a quote in the title is escaped, not left to break the frontmatter" \
   bash -c "grep -qF 'title: \"Fix the \\\"quoted\\\" thing\"' tasks/todo/*-fix-the-quoted-thing.md"
 
+echo "completions:"
+assert "bash completions are valid bash" \
+  bash -c "'${AMD}' completions bash 2>/dev/null > comp.bash && bash -n comp.bash"
+assert "zsh completions start with the compdef line" \
+  bash -c "'${AMD}' completions zsh 2>/dev/null | head -1 | grep -q '^#compdef amd$'"
+assert "fish completions are fish syntax" \
+  bash -c "'${AMD}' completions fish 2>/dev/null | grep -q '^complete -c amd'"
+assert "completions know the subcommands" \
+  bash -c "'${AMD}' completions bash 2>/dev/null | grep -q 'epics' && '${AMD}' completions fish 2>/dev/null | grep -q 'stories'"
+assert "completions offer the change types" \
+  bash -c "'${AMD}' completions fish 2>/dev/null | grep -q 'feat'"
+assert "completions offer the ticket types" \
+  bash -c "'${AMD}' completions fish 2>/dev/null | grep -q 'development'"
+assert "the shell is taken from \$SHELL when not given" \
+  bash -c "SHELL=/bin/zsh '${AMD}' completions 2>/dev/null | head -1 | grep -q '^#compdef amd$'"
+assert "an unknown shell errors with the choices" \
+  bash -c "SHELL=/bin/nope '${AMD}' completions 2>&1 | grep -q 'amd completions bash|zsh|fish'"
+assert "the install hint goes to stderr, not into the script" \
+  bash -c "'${AMD}' completions bash 2>/dev/null | grep -qv '^# install it with:' && '${AMD}' completions bash 2>&1 >/dev/null | grep -q 'install it with'"
+assert "completions work without a board" \
+  bash -c "cd '${nongit}' && '${AMD}' completions bash | grep -q '_amd'"
+rm -f comp.bash
+
 echo "guards:"
 assert "errors outside a git repository" \
   bash -c "cd '${nongit}' && ! '${AMD}' board"

@@ -6,11 +6,13 @@
 
 mod board;
 mod branch;
+mod completions;
 mod form;
 mod git;
 mod render;
 mod task;
 mod templates;
+mod value;
 
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
@@ -20,7 +22,9 @@ use std::path::Path;
 use std::process::{Command, ExitCode};
 
 use anyhow::{Context, Result, bail};
-use clap::{Args, Parser, Subcommand};
+use clap::builder::PossibleValuesParser;
+use clap::{Args, CommandFactory, Parser, Subcommand};
+use clap_complete::Shell;
 
 use board::{Board, Column};
 use templates::{DEFAULT_TEMPLATE, TEMPLATE_SUFFIX, TaskContext, Templates};
@@ -83,7 +87,11 @@ enum Cmd {
     /// List a column: todo, doing, done or all
     #[command(alias = "list")]
     Ls {
-        #[arg(default_value = "all", value_name = "COLUMN")]
+        #[arg(
+            default_value = "all",
+            value_name = "COLUMN",
+            value_parser = PossibleValuesParser::new(["todo", "doing", "done", "all"]),
+        )]
         column: String,
     },
     /// Move a task todo -> doing, and switch to its branch
@@ -127,6 +135,12 @@ enum Cmd {
         #[arg(value_name = "STORY")]
         story: Option<String>,
     },
+    /// Print a shell completion script (bash, zsh, fish, …)
+    Completions {
+        /// Shell to generate for; defaults to $SHELL
+        #[arg(value_name = "SHELL")]
+        shell: Option<Shell>,
+    },
     /// Inspect and customise the task templates
     Templates {
         #[command(subcommand)]
@@ -139,8 +153,8 @@ struct NewArgs {
     /// Task title; omit it in a terminal to fill in the form
     #[arg(value_name = "TITLE")]
     title: Option<String>,
-    /// Type label: a conventional-commit type (feat, fix, docs, chore, …)
-    #[arg(long, value_name = "TYPE")]
+    /// Change type on a development ticket: feat, fix, docs, chore, …
+    #[arg(long, value_name = "TYPE", value_parser = value::ChangeType)]
     r#type: Option<String>,
     /// Epic label this task belongs to
     #[arg(short = 'E', long, value_name = "EPIC")]
@@ -152,7 +166,14 @@ struct NewArgs {
     #[arg(short = 't', long = "tag", value_name = "TAG")]
     tags: Vec<String>,
     /// Ticket type: development (the default) or admin
-    #[arg(short = 'T', long = "template", alias = "ticket", default_value = DEFAULT_TEMPLATE, value_name = "TYPE")]
+    #[arg(
+        short = 'T',
+        long = "template",
+        alias = "ticket",
+        default_value = DEFAULT_TEMPLATE,
+        value_name = "TYPE",
+        value_parser = value::TicketType,
+    )]
     template: String,
     /// Ask for every field, even the ones given as arguments
     #[arg(short, long)]
@@ -203,6 +224,11 @@ fn run() -> Result<()> {
     render::set_plain(cli.plain);
     let command = cli.command.unwrap_or(Cmd::Board);
 
+    // Completions don't need a board — and often run before there is one.
+    if let Cmd::Completions { shell } = command {
+        return completions::print(shell, &mut Cli::command());
+    }
+
     // `init` is the one command that runs without an existing board.
     if let Cmd::Init = command {
         let board = Board::locate()?;
@@ -213,7 +239,7 @@ fn run() -> Result<()> {
 
     let board = Board::ensure()?;
     match command {
-        Cmd::Init => unreachable!("handled above"),
+        Cmd::Init | Cmd::Completions { .. } => unreachable!("handled above"),
         Cmd::New(args) => cmd_new(&board, args),
         Cmd::Board => cmd_ls(&board, "all"),
         Cmd::Ls { column } => cmd_ls(&board, &column),
