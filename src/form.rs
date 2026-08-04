@@ -153,6 +153,29 @@ pub fn tags(default: &str, known: Vec<String>) -> Result<Vec<String>> {
         .collect())
 }
 
+/// The tickets this one relates to, completed against what's on the board.
+/// Answers are refs (an id or a slug fragment); the caller resolves them, so a
+/// typo is caught here rather than recorded as a dangling link.
+pub fn related(default: &str, known: Vec<String>) -> Result<Vec<String>> {
+    let help = if known.is_empty() {
+        "comma separated ids; blank for none".to_string()
+    } else {
+        "comma separated ids or slugs, tab completes; blank for none".to_string()
+    };
+    let answer = convert(
+        Text::new("Related:")
+            .with_initial_value(default)
+            .with_help_message(&help)
+            .with_autocomplete(Completer::multi(known))
+            .prompt(),
+    )?;
+    Ok(answer
+        .split(',')
+        .map(|item| item.trim().to_string())
+        .filter(|item| !item.is_empty())
+        .collect())
+}
+
 /// Completes a label against the ones already on the board. In `multi` mode it
 /// completes the value after the last comma, leaving earlier ones alone.
 #[derive(Clone)]

@@ -206,6 +206,12 @@ impl Board {
         Ok(values)
     }
 
+    /// Every task's `NNN-slug`, the strings `amd new` completes a related ref
+    /// against.
+    pub fn stems(&self) -> Result<Vec<String>> {
+        Ok(self.tasks()?.into_iter().map(|task| task.stem).collect())
+    }
+
     /// Next id: one past the highest on the board, so ids are stable and never
     /// reused as tasks move between columns.
     pub fn next_id(&self) -> Result<u32> {

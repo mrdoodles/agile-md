@@ -3,6 +3,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use anyhow::{Context, Result, bail};
+
 use crate::board::Column;
 
 /// Longest slug we put in a filename (matches the pre-Rust `cut -c1-50`).
@@ -83,11 +85,100 @@ impl Task {
         self.meta("story").filter(|story| !story.is_empty())
     }
 
+    /// The tickets this one is related to: ids as recorded in `related`.
+    pub fn related(&self) -> Vec<String> {
+        self.meta("related")
+            .map(|raw| parse_list(&raw))
+            .unwrap_or_default()
+    }
+
+    /// Add ids to the `related` list, in id order and without duplicates.
+    /// Returns whether the file changed.
+    pub fn add_related(&self, ids: &[String]) -> Result<bool> {
+        let mut related = self.related();
+        let mut changed = false;
+        for id in ids {
+            if !related.iter().any(|known| known == id) {
+                related.push(id.clone());
+                changed = true;
+            }
+        }
+        if !changed {
+            return Ok(false);
+        }
+        related.sort();
+        let text = fs::read_to_string(&self.path)
+            .with_context(|| format!("reading {}", self.path.display()))?;
+        let updated = set_meta(&text, "related", &format!("[{}]", related.join(",")))
+            .with_context(|| format!("updating {}", self.path.display()))?;
+        fs::write(&self.path, updated)
+            .with_context(|| format!("writing {}", self.path.display()))?;
+        Ok(true)
+    }
+
     /// The branch this task should be worked on, as recorded when it was
     /// created. Editing the ticket's `branch:` changes where `amd start` goes.
     pub fn branch(&self) -> Option<String> {
         self.meta("branch").filter(|branch| !branch.is_empty())
     }
+}
+
+/// `[003,007]` -> `["003", "007"]`. Tolerant of spaces and quotes, since a
+/// human may well have typed the line.
+fn parse_list(raw: &str) -> Vec<String> {
+    raw.trim()
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .split(',')
+        .map(|item| item.trim().trim_matches(['"', '\'']).to_string())
+        .filter(|item| !item.is_empty())
+        .collect()
+}
+
+/// Replace a frontmatter value, adding the key before the closing fence when
+/// the ticket doesn't have it yet — tasks written by an older template, or by
+/// hand, still get linked.
+fn set_meta(text: &str, key: &str, value: &str) -> Result<String> {
+    if !text.starts_with("---") {
+        bail!("no frontmatter to update");
+    }
+    let mut out = String::with_capacity(text.len() + value.len());
+    let mut lines = text.lines();
+    let Some(open) = lines.next() else {
+        bail!("no frontmatter to update");
+    };
+    out.push_str(open);
+    out.push('\n');
+
+    let mut written = false;
+    let mut closed = false;
+    for line in lines {
+        if !closed && line.trim_end() == "---" {
+            if !written {
+                out.push_str(&format!("{key}: {value}\n"));
+                written = true;
+            }
+            closed = true;
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        }
+        if !closed
+            && !written
+            && let Some(rest) = line.strip_prefix(key)
+            && rest.starts_with(':')
+        {
+            out.push_str(&format!("{key}: {value}\n"));
+            written = true;
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    if !closed {
+        bail!("frontmatter is not closed");
+    }
+    Ok(out)
 }
 
 /// Search a task's frontmatter block (or, if it has none, the whole file) for
@@ -203,6 +294,45 @@ mod tests {
     #[test]
     fn meta_falls_back_to_the_whole_file_without_frontmatter() {
         assert_eq!(meta_in("# Heading\ntitle: Bare\n", "title"), Some("Bare"));
+    }
+
+    #[test]
+    fn lists_are_parsed_leniently() {
+        assert_eq!(parse_list("[003,007]"), ["003", "007"]);
+        assert_eq!(parse_list("[ \"003\", 007 ]"), ["003", "007"]);
+        assert_eq!(parse_list("[]"), [] as [String; 0]);
+    }
+
+    #[test]
+    fn set_meta_replaces_an_existing_key() {
+        let text = "---\nid: \"001\"\nrelated: []\n---\n\n## Notes\n";
+        let updated = set_meta(text, "related", "[003]").unwrap();
+        assert!(updated.contains("\nrelated: [003]\n"), "{updated}");
+        assert!(updated.ends_with("## Notes\n"), "{updated}");
+        assert_eq!(updated.matches("related").count(), 1, "{updated}");
+    }
+
+    #[test]
+    fn set_meta_adds_a_missing_key_before_the_fence() {
+        let text = "---\nid: \"001\"\n---\n\nbody\n";
+        let updated = set_meta(text, "related", "[003]").unwrap();
+        assert_eq!(updated, "---\nid: \"001\"\nrelated: [003]\n---\n\nbody\n");
+    }
+
+    #[test]
+    fn set_meta_leaves_the_body_alone() {
+        let text = "---\nid: \"001\"\n---\n\nrelated: not frontmatter\n";
+        let updated = set_meta(text, "related", "[003]").unwrap();
+        assert!(
+            updated.contains("\nrelated: not frontmatter\n"),
+            "{updated}"
+        );
+    }
+
+    #[test]
+    fn set_meta_needs_frontmatter() {
+        assert!(set_meta("no frontmatter here\n", "related", "[1]").is_err());
+        assert!(set_meta("---\nid: \"1\"\n", "related", "[1]").is_err());
     }
 
     #[test]

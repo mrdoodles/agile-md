@@ -125,6 +125,16 @@ enum Cmd {
         #[arg(value_name = "REF")]
         task: Option<String>,
     },
+    /// Link tickets together: both ends get the other in `related`
+    Link {
+        #[arg(value_name = "REF")]
+        task: String,
+        #[arg(value_name = "REF", required = true)]
+        to: Vec<String>,
+        /// Only record the link on the first ticket
+        #[arg(long)]
+        one_way: bool,
+    },
     /// List the epics on the board, or one epic's tasks
     Epics {
         #[arg(value_name = "EPIC")]
@@ -162,6 +172,9 @@ struct NewArgs {
     /// Story label this task belongs to
     #[arg(short = 'S', long, value_name = "STORY")]
     story: Option<String>,
+    /// Another ticket this one depends on or relates to (repeatable)
+    #[arg(short = 'r', long = "related", value_name = "REF")]
+    related: Vec<String>,
     /// Tag to add (repeatable)
     #[arg(short = 't', long = "tag", value_name = "TAG")]
     tags: Vec<String>,
@@ -273,6 +286,7 @@ fn run() -> Result<()> {
             let task = resolve(&board, task, "edit", &Column::ALL)?;
             open_editor(&task.path)
         }
+        Cmd::Link { task, to, one_way } => cmd_link(&board, &task, &to, one_way),
         Cmd::Epics { epic } => cmd_label(&board, "epic", epic),
         Cmd::Stories { story } => cmd_label(&board, "story", story),
         Cmd::Templates { command } => cmd_templates(&board, command.unwrap_or(TemplateCmd::List)),
@@ -325,6 +339,38 @@ fn cmd_start(
     let exists = git::branch_exists(&board.root, &name);
     git::switch_branch(&board.root, &name, !exists)?;
     println!("{} {name}", if exists { "switched to" } else { "branch" });
+    Ok(())
+}
+
+/// Link tickets together. The relation is symmetric by default — "related"
+/// reads the same from either end — so both files are updated unless the
+/// caller asks for one direction only.
+fn cmd_link(board: &Board, reference: &str, to: &[String], one_way: bool) -> Result<()> {
+    let task = board.find(reference)?;
+    let id = task.id_display();
+    let mut others = Vec::new();
+    for other in to {
+        let other = board.find(other)?;
+        if other.path == task.path {
+            bail!("a task can't be related to itself");
+        }
+        others.push(other);
+    }
+
+    let ids: Vec<String> = others.iter().map(|other| other.id_display()).collect();
+    if task.add_related(&ids)? {
+        println!("{} related: {}", id, ids.join(", "));
+    } else {
+        println!("{id} was already related to {}", ids.join(", "));
+    }
+    if one_way {
+        return Ok(());
+    }
+    for other in &others {
+        if other.add_related(std::slice::from_ref(&id))? {
+            println!("{} related: {id}", other.id_display());
+        }
+    }
     Ok(())
 }
 
@@ -471,6 +517,21 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
     let epic = label(board, "epic", args.epic, full_form)?;
     let story = label(board, "story", args.story, full_form)?;
 
+    // Related tickets are recorded as ids, so a link survives a task being
+    // renamed or moved between columns. Refs are resolved now: a typo is an
+    // error here rather than a dangling link discovered later.
+    let related_refs = if full_form && args.related.is_empty() {
+        form::related("", board.stems()?)?
+    } else {
+        args.related
+    };
+    let mut related = Vec::new();
+    for reference in &related_refs {
+        related.push(board.find(reference)?.id_display());
+    }
+    related.sort();
+    related.dedup();
+
     let tags = if full_form {
         form::tags(&args.tags.join(", "), board.tags()?)?
     } else {
@@ -515,6 +576,7 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
         kind,
         epic,
         story,
+        related: related.clone(),
         branch: branch_name.clone(),
         tags,
         created,
@@ -541,6 +603,17 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
     };
 
     fs::write(&path, body).with_context(|| format!("writing {}", path.display()))?;
+
+    // Backlink: "related" reads the same from either end, so the tickets this
+    // one names get it back rather than the link depending on which ticket you
+    // happened to be standing on.
+    for reference in &related {
+        let other = board.find(reference)?;
+        if other.add_related(std::slice::from_ref(&id))? {
+            println!("{} related: {id}", other.id_display());
+        }
+    }
+
     let note = if branch_name.is_empty() {
         String::new()
     } else {

@@ -181,6 +181,7 @@ Variables available in a task template:
 | `epic`      | `launch` (or empty)         |
 | `story`     | `guest-checkout` (or empty) |
 | `branch`    | `feature/publish-to-marketplace` |
+| `related`   | `["001", "002"]` (empty by default) |
 | `tags`      | `["release"]`               |
 | `created`   | `2026-08-03`                |
 | `timestamp` | `2026-08-03T09:12:44+01:00` |
@@ -224,6 +225,29 @@ tags: [release]
 The `NNN` id is assigned in creation order and gives a stable default ordering.
 Commit task moves like any other change — the `git mv` is the record of the
 transition. Tasks can reference each other with `[[NNN-slug]]` wikilinks.
+
+## Related tickets
+
+Tickets that depend on each other carry a `related` list — empty by default,
+holding ids so a link survives a rename or a move between columns:
+
+```bash
+amd new "Session store" --related 1 --related add-logout   # ids or slugs
+amd link 3 7                                               # link two that exist
+amd link 3 7 --one-way                                     # …or just one end
+```
+
+The relation is symmetric: linking 3 to 7 records 7 on ticket 3 *and* 3 on
+ticket 7, so it reads the same from either end and you can't forget the other
+half. Refs are resolved when they're recorded, so a typo is an error rather
+than a dangling link found later.
+
+```markdown
+related: [001,002]
+```
+
+Prose can still point at tickets with `[[NNN-slug]]` wikilinks; `related` is for
+the dependency itself.
 
 ## Shell completion
 

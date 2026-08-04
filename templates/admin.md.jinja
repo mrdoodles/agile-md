@@ -4,6 +4,7 @@ title: {{ title | yaml }}
 ticket: {{ template | yaml }}
 epic: {{ epic | yaml }}
 story: {{ story | yaml }}
+related: [{{ related | join(",") }}]
 created: {{ created | yaml }}
 tags: [{{ tags | join(",") }}]
 ---

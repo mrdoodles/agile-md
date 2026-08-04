@@ -192,6 +192,30 @@ echo "quoting:"
 assert "a quote in the title is escaped, not left to break the frontmatter" \
   bash -c "grep -qF 'title: \"Fix the \\\"quoted\\\" thing\"' tasks/todo/*-fix-the-quoted-thing.md"
 
+echo "related tickets:"
+assert "related is empty by default" \
+  bash -c "grep -q '^related: \[\]$' tasks/*/001-first-task.md"
+"${AMD}" new "Depends on the first" --related 1 >/dev/null
+assert "--related records the id" \
+  bash -c "grep -q '^related: \[001\]$' tasks/todo/*-depends-on-the-first.md"
+assert "the other end is linked back" \
+  bash -c "grep -qE '^related: \[0[0-9]+\]$' tasks/*/001-first-task.md"
+assert "an unknown related ref is rejected at creation" \
+  bash -c "! '${AMD}' new 'Dangling' --related 99"
+assert "amd link relates two tickets both ways" \
+  bash -c "'${AMD}' link 2 depends-on-the-first >/dev/null \
+    && grep -q 'related: \[0' tasks/*/002-second-task.md \
+    && grep -q '002' tasks/todo/*-depends-on-the-first.md"
+assert "amd link is idempotent" \
+  bash -c "'${AMD}' link 2 depends-on-the-first | grep -q 'already related'"
+assert "a task cannot be related to itself" \
+  bash -c "'${AMD}' link 2 2 2>&1 | grep -q \"can't be related to itself\""
+"${AMD}" new "One way only" >/dev/null
+assert "amd link --one-way leaves the other end alone" \
+  bash -c "'${AMD}' link 2 one-way --one-way >/dev/null && ! grep -q '002' tasks/todo/*-one-way-only.md"
+assert "admin tickets carry the list too" \
+  bash -c "grep -q '^related: \[\]$' tasks/*/006-renew-the-certificates.md"
+
 echo "completions:"
 assert "bash completions are valid bash" \
   bash -c "'${AMD}' completions bash 2>/dev/null > comp.bash && bash -n comp.bash"

@@ -83,6 +83,13 @@ MiniJinja templates**.
   commits *and* branches validate. `AMD_TYPES` overrides the accepted types.
 - Optional `epic` and `story` labels group work on either ticket type
   (`amd epics`, `amd stories`); tags stay free-form.
+- **`related` links tickets**, empty by default. It stores **ids**, not paths or
+  slugs, so a link survives a rename or a column move. Refs are resolved through
+  `Board::find` when recorded, so a typo fails then and there. The relation is
+  symmetric — `amd link` and `amd new --related` both write the backlink, and
+  `--one-way` opts out. `Task::add_related` rewrites the frontmatter through
+  `set_meta`, which inserts the key before the closing fence when a ticket
+  doesn't have it yet, so hand-written and older tickets can still be linked.
 - **Form order is title, ticket type, change, epic, story, tags** — the title
   first because it's the one thing every ticket has and it names the file
   whatever the labels turn out to be. It's validated with
@@ -148,7 +155,7 @@ MiniJinja templates**.
 - Custom `yaml` filter quotes/escapes frontmatter values, so a title containing
   `"` can't corrupt the block. Use it for every frontmatter value.
 - `TaskContext` is the contract with templates (`id`, `number`, `title`, `slug`,
-  `type`, `epic`, `story`, `branch`, `tags`, `created`, `timestamp`, `column`,
+  `type`, `epic`, `story`, `related`, `branch`, `tags`, `created`, `timestamp`, `column`,
   `author`, `email`, `board`, `template`, `extra`). Adding a field is additive;
   renaming one breaks every user template — treat it as a public API.
 - Template errors are flattened by `render_error()` (message + line + cause

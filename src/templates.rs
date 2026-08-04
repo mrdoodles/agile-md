@@ -76,6 +76,8 @@ pub struct TaskContext {
     pub epic: String,
     /// Story label, or an empty string.
     pub story: String,
+    /// Ids of the tickets this one depends on or relates to. Empty by default.
+    pub related: Vec<String>,
     /// Branch this task will get on `amd start`, e.g. `feature/add-login`.
     /// Empty on ticket types that don't use branches.
     pub branch: String,
@@ -400,6 +402,7 @@ mod tests {
             kind: "feat".to_string(),
             epic: "checkout".to_string(),
             story: "guest-checkout".to_string(),
+            related: vec!["003".to_string()],
             branch: "feature/first-task".to_string(),
             tags: vec!["x".to_string(), "y".to_string()],
             created: "2026-08-03".to_string(),
@@ -433,6 +436,7 @@ mod tests {
             "{rendered}"
         );
         assert!(rendered.contains("\ntags: [x,y]\n"), "{rendered}");
+        assert!(rendered.contains("\nrelated: [003]\n"), "{rendered}");
         assert!(
             rendered.contains("\nticket: \"development\"\n"),
             "{rendered}"

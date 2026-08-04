@@ -6,6 +6,7 @@ type: {{ type | yaml }}
 epic: {{ epic | yaml }}
 story: {{ story | yaml }}
 branch: {{ branch | yaml }}
+related: [{{ related | join(",") }}]
 created: {{ created | yaml }}
 tags: [{{ tags | join(",") }}]
 ---
