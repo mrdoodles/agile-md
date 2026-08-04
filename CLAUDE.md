@@ -73,7 +73,9 @@ MiniJinja templates**.
   renewal, an approval — has nothing to check out.
 - **The template decides whether there's a branch.** `Templates::branches()`
   asks whether the template source references `branch`; the development one
-  does, the admin one doesn't. No flag, no separate registry, and a custom
+  does, the admin one doesn't. `Templates::uses()` generalises it: a template
+  that shows `type` is asked for a change type even when it records no branch,
+  so the two questions aren't welded together. No flag, no separate registry, and a custom
   template opts in just by using the variable. `templates::references()` is
   word-boundary aware so `branches` and `my_branch` don't count.
 - On a development ticket the `type` label is a **conventional-commit** type
@@ -81,8 +83,12 @@ MiniJinja templates**.
   convention (`feature/`, `bugfix/`, `hotfix/`, `chore/`). `prefix()` maps
   between them, matching the two lists in mrdoodles/conventional-validator, so
   commits *and* branches validate. `AMD_TYPES` overrides the accepted types.
-- Optional `epic` and `story` labels group work on either ticket type
-  (`amd epics`, `amd stories`); tags stay free-form.
+- **One `parent` field, not epic/story.** Nesting gives both levels and any
+  depth, and nothing has to be decided up front. It stores an **id**, resolved
+  through `Board::find` when recorded. The child's template writes a `## Parent`
+  wikilink and `Task::add_child_link` appends the child to the parent's
+  `## Children` list, so the link is navigable from either end in an editor.
+  Tags stay free-form.
 - **`related` links tickets**, empty by default. It stores **ids**, not paths or
   slugs, so a link survives a rename or a column move. Refs are resolved through
   `Board::find` when recorded, so a typo fails then and there. The relation is
@@ -104,13 +110,20 @@ MiniJinja templates**.
 
 ## Board rendering (`src/render.rs`)
 
-- Rich tables only when stdout is a terminal and neither `--plain` nor
-  `NO_COLOR` is set; otherwise the plain `  [id] title  (labels)` form, which
-  is what `tests/test.sh` asserts on and what pipes into `grep`.
-- `richrs` sizes its borders from header widths, so setting `Column::min_width`
-  produces borders that don't match the rows. Cells are therefore padded and
-  ellipsised here (`fit()`) before being handed over — which also lines the
-  three column tables up with each other.
+- Each column is a **tree**: `forest()` nests tasks by `parent`, ordered by id
+  at every level. A child whose parent is in another column stays at the top
+  level with a `^NNN` marker — the columns are the board's primary structure.
+  `forest()` is a pure function over `(Task, Option<String>)` pairs, so it's
+  unit-tested without touching the filesystem; parents are read once per column
+  rather than per lookup (each read is a file read).
+- Rich (`richrs::Tree`) only when stdout is a terminal and neither `--plain` nor
+  `NO_COLOR` is set; otherwise the same tree as indentation, which is what
+  `tests/test.sh` asserts on and what pipes into `grep`.
+- Ids are **OSC-8 hyperlinks** in the rich path (`TERM=dumb` opts out), so
+  clicking one opens the ticket. They are deliberately not in the plain path:
+  escape sequences have no business in a pipe. Note this is why the board moved
+  off `richrs::Table` — a table measures cell widths and would count the escape
+  bytes, misaligning every border.
 - A rendering failure falls back to plain output rather than erroring: never
   let cosmetics stop someone seeing the board.
 
@@ -155,7 +168,7 @@ MiniJinja templates**.
 - Custom `yaml` filter quotes/escapes frontmatter values, so a title containing
   `"` can't corrupt the block. Use it for every frontmatter value.
 - `TaskContext` is the contract with templates (`id`, `number`, `title`, `slug`,
-  `type`, `epic`, `story`, `related`, `branch`, `tags`, `created`, `timestamp`, `column`,
+  `type`, `parent`, `parent_link`, `related`, `branch`, `tags`, `created`, `timestamp`, `column`,
   `author`, `email`, `board`, `template`, `extra`). Adding a field is additive;
   renaming one breaks every user template — treat it as a public API.
 - Template errors are flattened by `render_error()` (message + line + cause

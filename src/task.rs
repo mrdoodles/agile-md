@@ -10,6 +10,9 @@ use crate::board::Column;
 /// Longest slug we put in a filename (matches the pre-Rust `cut -c1-50`).
 const MAX_SLUG: usize = 50;
 
+/// Heading the child wikilinks are collected under.
+const CHILDREN_HEADING: &str = "## Children";
+
 #[derive(Clone, Debug)]
 pub struct Task {
     pub path: PathBuf,
@@ -75,14 +78,10 @@ impl Task {
         self.meta("ticket").filter(|ticket| !ticket.is_empty())
     }
 
-    /// The `epic` label, if the task carries one.
-    pub fn epic(&self) -> Option<String> {
-        self.meta("epic").filter(|epic| !epic.is_empty())
-    }
-
-    /// The `story` label, if the task carries one.
-    pub fn story(&self) -> Option<String> {
-        self.meta("story").filter(|story| !story.is_empty())
+    /// The id of this ticket's parent, if it has one. Ids rather than paths,
+    /// so the link survives a rename or a move between columns.
+    pub fn parent(&self) -> Option<String> {
+        self.meta("parent").filter(|parent| !parent.is_empty())
     }
 
     /// The tickets this one is related to: ids as recorded in `related`.
@@ -111,6 +110,31 @@ impl Task {
             .with_context(|| format!("reading {}", self.path.display()))?;
         let updated = set_meta(&text, "related", &format!("[{}]", related.join(",")))
             .with_context(|| format!("updating {}", self.path.display()))?;
+        fs::write(&self.path, updated)
+            .with_context(|| format!("writing {}", self.path.display()))?;
+        Ok(true)
+    }
+
+    /// Record a child under a `## Children` heading, as a wikilink an editor
+    /// can follow. The heading is added when it isn't there yet.
+    pub fn add_child_link(&self, stem: &str) -> Result<bool> {
+        let text = fs::read_to_string(&self.path)
+            .with_context(|| format!("reading {}", self.path.display()))?;
+        let link = format!("- [[{stem}]]");
+        if text.lines().any(|line| line.trim() == link) {
+            return Ok(false);
+        }
+        let mut updated = text.trim_end().to_string();
+        if !text.contains(CHILDREN_HEADING) {
+            updated.push_str("\n\n");
+            updated.push_str(CHILDREN_HEADING);
+            updated.push('\n');
+        }
+        // Append under the heading: children are listed in creation order,
+        // which is id order.
+        updated.push('\n');
+        updated.push_str(&link);
+        updated.push('\n');
         fs::write(&self.path, updated)
             .with_context(|| format!("writing {}", self.path.display()))?;
         Ok(true)

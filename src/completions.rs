@@ -89,7 +89,7 @@ mod tests {
         ] {
             let script = script(shell);
             assert!(script.contains(marker), "{shell}: missing {marker}");
-            for command in ["new", "start", "epics", "templates", "completions"] {
+            for command in ["new", "start", "link", "templates", "completions"] {
                 assert!(script.contains(command), "{shell}: missing {command}");
             }
         }

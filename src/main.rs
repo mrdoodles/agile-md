@@ -40,7 +40,8 @@ conventional commit types), so `amd start` on a feat titled \"Add login\"
 creates and switches to feature/add-login. Admin work — a rota, a renewal,
 an approval — has nothing to check out, so it gets no branch.
 
-Both carry optional epic and story labels.
+Tickets nest: `--parent <ref>` puts one under another, and the board shows
+the tree. That covers epics and stories without separate fields.
 
 Environment:
   AMD_DIR       board directory name under the repository root (default: tasks)
@@ -135,16 +136,6 @@ enum Cmd {
         #[arg(long)]
         one_way: bool,
     },
-    /// List the epics on the board, or one epic's tasks
-    Epics {
-        #[arg(value_name = "EPIC")]
-        epic: Option<String>,
-    },
-    /// List the stories on the board, or one story's tasks
-    Stories {
-        #[arg(value_name = "STORY")]
-        story: Option<String>,
-    },
     /// Print a shell completion script (bash, zsh, fish, …)
     Completions {
         /// Shell to generate for; defaults to $SHELL
@@ -166,12 +157,9 @@ struct NewArgs {
     /// Change type on a development ticket: feat, fix, docs, chore, …
     #[arg(long, value_name = "TYPE", value_parser = value::ChangeType)]
     r#type: Option<String>,
-    /// Epic label this task belongs to
-    #[arg(short = 'E', long, value_name = "EPIC")]
-    epic: Option<String>,
-    /// Story label this task belongs to
-    #[arg(short = 'S', long, value_name = "STORY")]
-    story: Option<String>,
+    /// The ticket this one sits under (an epic, a story, anything)
+    #[arg(short = 'p', long, value_name = "REF")]
+    parent: Option<String>,
     /// Another ticket this one depends on or relates to (repeatable)
     #[arg(short = 'r', long = "related", value_name = "REF")]
     related: Vec<String>,
@@ -287,8 +275,6 @@ fn run() -> Result<()> {
             open_editor(&task.path)
         }
         Cmd::Link { task, to, one_way } => cmd_link(&board, &task, &to, one_way),
-        Cmd::Epics { epic } => cmd_label(&board, "epic", epic),
-        Cmd::Stories { story } => cmd_label(&board, "story", story),
         Cmd::Templates { command } => cmd_templates(&board, command.unwrap_or(TemplateCmd::List)),
     }
 }
@@ -374,70 +360,6 @@ fn cmd_link(board: &Board, reference: &str, to: &[String], one_way: bool) -> Res
     Ok(())
 }
 
-/// Ask for a grouping label, completing against the ones already in use.
-fn label(board: &Board, name: &str, given: Option<String>, full_form: bool) -> Result<String> {
-    match given {
-        Some(value) => Ok(value.trim().to_string()),
-        None if full_form => {
-            let known = board.label_values(name)?;
-            let message = format!("{}:", templates::field_label(name));
-            form::label(
-                &message,
-                "",
-                known,
-                "optional label grouping tasks; blank for none",
-            )
-        }
-        None => Ok(String::new()),
-    }
-}
-
-/// `amd epics` / `amd stories`: the index for a grouping label, or one
-/// value's tasks. Progress is counted from the columns, so it's always current.
-fn cmd_label(board: &Board, label: &str, value: Option<String>) -> Result<()> {
-    let tasks = board.tasks()?;
-    let of = |task: &task::Task| task.meta(label).filter(|value| !value.is_empty());
-
-    if let Some(value) = value {
-        let mut found = false;
-        for task in tasks
-            .iter()
-            .filter(|task| of(task).as_deref() == Some(&value))
-        {
-            found = true;
-            println!(
-                "  [{}] {} ({}/)",
-                task.id_display(),
-                task.title(),
-                task.column
-            );
-        }
-        if !found {
-            bail!("no tasks with {label} '{value}'");
-        }
-        return Ok(());
-    }
-
-    let values = board.label_values(label)?;
-    if values.is_empty() {
-        println!("(no {label}s — add one with: amd new \"…\" --{label} <name>)");
-        return Ok(());
-    }
-    let width = values.iter().map(String::len).max().unwrap_or(0);
-    for value in values {
-        let mine: Vec<&task::Task> = tasks
-            .iter()
-            .filter(|task| of(task).as_deref() == Some(value.as_str()))
-            .collect();
-        let done = mine
-            .iter()
-            .filter(|task| task.column == Column::Done)
-            .count();
-        println!("{value:width$}  {done}/{} done", mine.len());
-    }
-    Ok(())
-}
-
 /// Resolve a task reference, or offer a picker when it was left out.
 fn resolve(
     board: &Board,
@@ -496,7 +418,10 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
     // records a `branch` needs a commit type to name it, one that doesn't
     // never asks.
     let branched = templates.branches(&template)?;
-    let kind = if branched {
+    // A template that shows a change type gets asked for one even when it
+    // records no branch; a branch needs a type to name it either way.
+    let wants_type = branched || templates.uses(&template, "type")?;
+    let kind = if wants_type {
         match args.r#type {
             Some(kind) => {
                 branch::validate_type(&kind)?;
@@ -514,8 +439,33 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
         String::new()
     };
 
-    let epic = label(board, "epic", args.epic, full_form)?;
-    let story = label(board, "story", args.story, full_form)?;
+    // One parent instead of epic and story: nesting gives both, and any depth
+    // past them. Resolved to an id now, so a typo can't become a dangling link.
+    let parent_ref = match args.parent {
+        Some(parent) => Some(parent),
+        None if full_form => {
+            let answer = form::label(
+                "Parent:",
+                "",
+                board.stems()?,
+                "the ticket this one sits under; blank for none",
+            )?;
+            (!answer.is_empty()).then_some(answer)
+        }
+        None => None,
+    };
+    let parent_task = match &parent_ref {
+        Some(reference) => Some(board.find(reference)?),
+        None => None,
+    };
+    let parent = parent_task
+        .as_ref()
+        .map(|task| task.id_display())
+        .unwrap_or_default();
+    let parent_link = parent_task
+        .as_ref()
+        .map(|task| task.stem.clone())
+        .unwrap_or_default();
 
     // Related tickets are recorded as ids, so a link survives a task being
     // renamed or moved between columns. Refs are resolved now: a typo is an
@@ -574,8 +524,8 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
         title,
         slug: slug.clone(),
         kind,
-        epic,
-        story,
+        parent,
+        parent_link,
         related: related.clone(),
         branch: branch_name.clone(),
         tags,
@@ -603,6 +553,13 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
     };
 
     fs::write(&path, body).with_context(|| format!("writing {}", path.display()))?;
+
+    // The parent lists its children, so navigation works from either end.
+    if let Some(parent) = &parent_task
+        && parent.add_child_link(&format!("{id}-{slug}"))?
+    {
+        println!("{} children: {id}", parent.id_display());
+    }
 
     // Backlink: "related" reads the same from either end, so the tickets this
     // one names get it back rather than the link depending on which ticket you

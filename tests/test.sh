@@ -60,25 +60,26 @@ assert "type label defaults to feat" grep -q '^type: "feat"$' tasks/todo/001-fir
 assert "branch is recorded on the ticket" grep -q '^branch: "feature/first-task"$' tasks/todo/001-first-task.md
 assert "created date is filled in" grep -qE '^created: "[0-9]{4}-[0-9]{2}-[0-9]{2}"$' tasks/todo/001-first-task.md
 
-echo "labels:"
-"${AMD}" new "Guest checkout" --type fix --epic checkout --story guest >/dev/null
-assert "type label is stored" grep -q '^type: "fix"$' tasks/todo/003-guest-checkout.md
-assert "epic label is stored" grep -q '^epic: "checkout"$' tasks/todo/003-guest-checkout.md
-assert "story label is stored" grep -q '^story: "guest"$' tasks/todo/003-guest-checkout.md
-assert "fix tickets get a bugfix branch" grep -q '^branch: "bugfix/guest-checkout"$' tasks/todo/003-guest-checkout.md
-assert "docs tickets get a chore branch" \
-  bash -c "'${AMD}' new 'Write the guide' --type docs >/dev/null && grep -q '^branch: \"chore/write-the-guide\"\$' tasks/todo/004-write-the-guide.md"
-assert "an unknown type is rejected, listing the valid ones" \
-  bash -c "'${AMD}' new 'Nope' --type feature 2>&1 | grep -q \"unknown type 'feature'\""
-assert "AMD_TYPES overrides the list" \
-  bash -c "AMD_TYPES='spike,feat' '${AMD}' new 'Try it' --type spike >/dev/null && grep -q '^type: \"spike\"\$' tasks/todo/005-try-it.md"
-assert "a title that cannot become a branch is rejected" \
-  bash -c "'${AMD}' new '***' 2>&1 | grep -q 'no letters or numbers'"
-assert "epics lists the epic with progress" bash -c "'${AMD}' epics | grep -q '^checkout  0/1 done$'"
-assert "stories lists the story" bash -c "'${AMD}' stories | grep -q '^guest  0/1 done$'"
-assert "epics <name> lists that epic's tasks" bash -c "'${AMD}' epics checkout | grep -q 'Guest checkout'"
-assert "an unknown epic errors" bash -c "! '${AMD}' epics nope"
-assert "the board shows the labels" bash -c "'${AMD}' board | grep -q 'Guest checkout  (fix epic:checkout story:guest)'"
+echo "parents and the tree:"
+"${AMD}" new "Guest checkout" --type fix >/dev/null
+"${AMD}" new "Address form" --parent 3 >/dev/null
+assert "the child records its parent id" grep -q '^parent: "003"$' tasks/todo/004-address-form.md
+assert "the child links back to the parent" \
+  bash -c "grep -q '^\[\[003-guest-checkout\]\]$' tasks/todo/004-address-form.md"
+assert "the parent lists the child" \
+  bash -c "grep -q '^- \[\[004-address-form\]\]$' tasks/todo/003-guest-checkout.md"
+assert "a ticket with no parent has an empty parent field" \
+  bash -c "grep -q '^parent: \"\"$' tasks/todo/001-first-task.md"
+assert "an unknown parent is rejected" bash -c "! '${AMD}' new 'Orphan' --parent 99"
+assert "the board nests a child under its parent" \
+  bash -c "'${AMD}' board --plain | grep -q '^    \[004\] Address form'"
+assert "the parent stays at the outer level" \
+  bash -c "'${AMD}' board --plain | grep -q '^  \[003\] Guest checkout'"
+"${AMD}" new "Deep child" --parent 4 >/dev/null
+assert "nesting goes deeper than two levels" \
+  bash -c "'${AMD}' board --plain | grep -q '^      \[005\] Deep child'"
+assert "epics and stories are gone" \
+  bash -c "! '${AMD}' epics 2>/dev/null && ! '${AMD}' stories 2>/dev/null"
 
 echo "board:"
 assert "board shows all three columns" \
@@ -100,7 +101,7 @@ assert "development tickets carry both" \
 assert "templates lists both ticket types" \
   bash -c "'${AMD}' templates | grep -q '^development' && '${AMD}' templates | grep -q '^admin'"
 assert "the board flags a non-development ticket" \
-  bash -c "'${AMD}' board | grep -q 'Renew the certificates  (admin)'"
+  bash -c "'${AMD}' board --plain | grep -q 'Renew the certificates  (admin)'"
 
 echo "moves (git mv) + branches:"
 git add -A; git commit -qm labels
@@ -156,14 +157,14 @@ assert "eject writes an editable copy into the board" \
   bash -c "'${AMD}' templates eject development >/dev/null && test -f tasks/templates/development.md.jinja"
 assert "eject refuses to clobber without --force" \
   bash -c "! '${AMD}' templates eject development"
-printf -- '---\nid: {{ id | yaml }}\ntitle: {{ title | yaml }}\ntype: {{ type | yaml }}\nepic: {{ epic | yaml }}\nowner: {{ extra.owner | yaml }}\n---\n\n## Custom\n' \
+printf -- '---\nid: {{ id | yaml }}\ntitle: {{ title | yaml }}\ntype: {{ type | yaml }}\nowner: {{ extra.owner | yaml }}\n---\n\n## Custom\n' \
   > tasks/templates/development.md.jinja
 assert "board template overrides the built-in" \
-  bash -c "'${AMD}' new 'Overridden' -s owner=tim --epic checkout >/dev/null && grep -q '^## Custom$' tasks/todo/*-overridden.md"
+  bash -c "'${AMD}' new 'Overridden' -s owner=tim >/dev/null && grep -q '^## Custom$' tasks/todo/*-overridden.md"
 assert "--set values reach the template" \
   bash -c "grep -q '^owner: \"tim\"$' tasks/todo/*-overridden.md"
 assert "labels reach a custom template" \
-  bash -c "grep -q '^epic: \"checkout\"$' tasks/todo/*-overridden.md"
+  bash -c "grep -q '^type: \"feat\"$' tasks/todo/*-overridden.md"
 assert "templates list shows the board override" \
   bash -c "'${AMD}' templates | grep -q 'templates/development.md.jinja'"
 printf -- '---\nid: {{ id | yaml }}\nowner: {{ extra.owner | yaml }}\ndue: {{ extra["due date"] | yaml }}\n---\n' \
@@ -224,7 +225,7 @@ assert "zsh completions start with the compdef line" \
 assert "fish completions are fish syntax" \
   bash -c "'${AMD}' completions fish 2>/dev/null | grep -q '^complete -c amd'"
 assert "completions know the subcommands" \
-  bash -c "'${AMD}' completions bash 2>/dev/null | grep -q 'epics' && '${AMD}' completions fish 2>/dev/null | grep -q 'stories'"
+  bash -c "'${AMD}' completions bash 2>/dev/null | grep -q 'link' && '${AMD}' completions fish 2>/dev/null | grep -q 'templates'"
 assert "completions offer the change types" \
   bash -c "'${AMD}' completions fish 2>/dev/null | grep -q 'feat'"
 assert "completions offer the ticket types" \

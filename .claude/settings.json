@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(AMD_NO_INPUT=1 ./target/debug/amd new \"link related tickets\" --type feat --related 2)"
+    ]
+  }
+}

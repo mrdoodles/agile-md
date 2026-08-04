@@ -2,13 +2,18 @@
 id: {{ id | yaml }}
 title: {{ title | yaml }}
 ticket: {{ template | yaml }}
-epic: {{ epic | yaml }}
-story: {{ story | yaml }}
+parent: {{ parent | yaml }}
 related: [{{ related | join(",") }}]
 created: {{ created | yaml }}
 tags: [{{ tags | join(",") }}]
 ---
 
+{% if parent %}
+## Parent
+
+[[{{ parent_link }}]]
+
+{% endif %}
 ## Notes
 
 

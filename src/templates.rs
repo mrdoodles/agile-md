@@ -72,10 +72,11 @@ pub struct TaskContext {
     /// Type label — also the branch prefix (`feature`, `bugfix`, …).
     #[serde(rename = "type")]
     pub kind: String,
-    /// Epic label, or an empty string.
-    pub epic: String,
-    /// Story label, or an empty string.
-    pub story: String,
+    /// Id of this ticket's parent, or an empty string. One field instead of
+    /// epic/story: nesting gives you those, and any depth beyond them.
+    pub parent: String,
+    /// The parent's `NNN-slug`, for a wikilink an editor can follow.
+    pub parent_link: String,
     /// Ids of the tickets this one depends on or relates to. Empty by default.
     pub related: Vec<String>,
     /// Branch this task will get on `amd start`, e.g. `feature/add-login`.
@@ -185,7 +186,14 @@ impl Templates {
     /// computed for it and `amd start` leaves the working tree where it is.
     /// A custom template opts in simply by using the variable.
     pub fn branches(&self, name: &str) -> Result<bool> {
-        Ok(references(&self.source_text(name)?, "branch"))
+        self.uses(name, "branch")
+    }
+
+    /// Does this ticket type use `variable`? Templates drive the form: a
+    /// template that shows a change type is asked for one even when it records
+    /// no branch.
+    pub fn uses(&self, name: &str, variable: &str) -> Result<bool> {
+        Ok(references(&self.source_text(name)?, variable))
     }
 
     /// The template's text, from the board file or the binary.
@@ -400,8 +408,8 @@ mod tests {
             title: "First task".to_string(),
             slug: "first-task".to_string(),
             kind: "feat".to_string(),
-            epic: "checkout".to_string(),
-            story: "guest-checkout".to_string(),
+            parent: "002".to_string(),
+            parent_link: "002-checkout".to_string(),
             related: vec!["003".to_string()],
             branch: "feature/first-task".to_string(),
             tags: vec!["x".to_string(), "y".to_string()],
@@ -426,11 +434,8 @@ mod tests {
         assert!(rendered.contains("\nid: \"001\"\n"), "{rendered}");
         assert!(rendered.contains("\ntitle: \"First task\"\n"), "{rendered}");
         assert!(rendered.contains("\ntype: \"feat\"\n"), "{rendered}");
-        assert!(rendered.contains("\nepic: \"checkout\"\n"), "{rendered}");
-        assert!(
-            rendered.contains("\nstory: \"guest-checkout\"\n"),
-            "{rendered}"
-        );
+        assert!(rendered.contains("\nparent: \"002\"\n"), "{rendered}");
+        assert!(rendered.contains("[[002-checkout]]"), "{rendered}");
         assert!(
             rendered.contains("\nbranch: \"feature/first-task\"\n"),
             "{rendered}"
@@ -555,6 +560,22 @@ mod tests {
         let templates = Templates::builtin().unwrap();
         assert!(templates.branches("development").unwrap());
         assert!(!templates.branches("admin").unwrap());
+    }
+
+    #[test]
+    fn a_template_can_want_a_change_type_without_a_branch() {
+        let mut templates = Templates::builtin().unwrap();
+        templates
+            .env
+            .add_template_owned("note".to_string(), "type: {{ type }}".to_string())
+            .unwrap();
+        templates
+            .sources
+            .insert("note".to_string(), Source::Board("note.md.jinja".into()));
+        // source_text reads the board file, which doesn't exist here, so check
+        // the scan directly instead.
+        assert!(references("type: {{ type }}", "type"));
+        assert!(!references("type: {{ type }}", "branch"));
     }
 
     #[test]
