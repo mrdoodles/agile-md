@@ -18,6 +18,14 @@ use crate::templates;
 /// Default board directory name; override with `AMD_DIR`.
 const DEFAULT_DIR: &str = "tasks";
 
+/// Where junked tickets go. Not a column: it's off the board, and its contents
+/// are gitignored, so junking a ticket takes it out of the history rather than
+/// recording a fourth status.
+const JUNK: &str = "junk";
+
+/// Keeps the junk drawer itself in git while ignoring what's in it.
+const JUNK_GITIGNORE: &str = "*\n!.gitignore\n";
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Column {
     Todo,
@@ -121,6 +129,10 @@ impl Board {
         self.root.join("templates")
     }
 
+    pub fn junk_dir(&self) -> PathBuf {
+        self.root.join(JUNK)
+    }
+
     /// Scaffold the columns and the board README. Idempotent.
     pub fn create(&self) -> Result<()> {
         for column in Column::ALL {
@@ -131,6 +143,15 @@ impl Board {
                 fs::write(&keep, "").with_context(|| format!("creating {}", keep.display()))?;
             }
         }
+        // The junk drawer is tracked, its contents are not.
+        let junk = self.junk_dir();
+        fs::create_dir_all(&junk).with_context(|| format!("creating {}", junk.display()))?;
+        let ignore = junk.join(".gitignore");
+        if !ignore.exists() {
+            fs::write(&ignore, JUNK_GITIGNORE)
+                .with_context(|| format!("creating {}", ignore.display()))?;
+        }
+
         let readme = self.root.join("README.md");
         if !readme.exists() {
             let rendered = templates::render_board_readme(self)?;
@@ -197,16 +218,61 @@ impl Board {
         Ok(self.tasks()?.into_iter().map(|task| task.stem).collect())
     }
 
-    /// Next id: one past the highest on the board, so ids are stable and never
-    /// reused as tasks move between columns.
+    /// Tickets that have been junked. Not part of the board, but they still
+    /// hold ids.
+    pub fn junked(&self) -> Result<Vec<Task>> {
+        let dir = self.junk_dir();
+        let entries = match fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(err) => return Err(err).with_context(|| format!("reading {}", dir.display())),
+        };
+        let mut tasks = Vec::new();
+        for entry in entries {
+            let path = entry
+                .with_context(|| format!("reading {}", dir.display()))?
+                .path();
+            // Junked tickets keep the column they were last in; nothing reads
+            // it, but it means a restored file lands somewhere sensible.
+            if path.is_file()
+                && let Some(task) = Task::from_path(&path, Column::Todo)
+            {
+                tasks.push(task);
+            }
+        }
+        Ok(tasks)
+    }
+
+    /// Next id: one past the highest anywhere, **including the junk drawer**.
+    /// Reusing the id of a junked ticket would silently repoint every `parent`
+    /// and `related` that named it.
     pub fn next_id(&self) -> Result<u32> {
         let max = self
             .tasks()?
             .iter()
+            .chain(self.junked()?.iter())
             .filter_map(|task| task.id)
             .max()
             .unwrap_or(0);
         Ok(max + 1)
+    }
+
+    /// Take a ticket off the board. The junk directory is gitignored, so a
+    /// tracked ticket leaves the index (`git rm --cached`) and then moves —
+    /// `git mv` would refuse the ignored destination, and forcing it would put
+    /// the junk back into the history the .gitignore is there to keep it out of.
+    pub fn junk(&self, task: &Task) -> Result<PathBuf> {
+        let dir = self.junk_dir();
+        fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+        let dest = dir.join(task.file_name());
+        if dest.exists() {
+            bail!("{} already exists", dest.display());
+        }
+        if git::is_tracked(&self.root, &task.path) {
+            git::untrack(&self.root, &task.path)?;
+        }
+        fs::rename(&task.path, &dest).with_context(|| format!("moving {}", task.path.display()))?;
+        Ok(dest)
     }
 
     /// Resolve a task reference: a numeric id (`7`, `007`) or a unique slug

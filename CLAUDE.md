@@ -68,6 +68,13 @@ one implementation of the board.
   task (errors on 0 or >1 matches).
 - `Board::move_task()` uses `git mv` for tracked files (history follows the
   rename), else `fs::rename`. It does **not** commit — the user commits the move.
+- `Board::junk()` (`amd rm`) moves a ticket to `<board>/junk/`, which is **not**
+  a column: it's off the board and its contents are gitignored. That means
+  `git mv` would refuse the ignored destination and forcing it would put the
+  junk back into the history the `.gitignore` exists to keep out, so a tracked
+  ticket is `git rm --cached`'d and then moved. `next_id()` counts the junk
+  drawer as well — reusing a junked id would silently repoint every `parent`
+  and `related` that named it.
 - `Board::ensure()` runs before any board-requiring command: if there's no
   board, it prompts to create one when interactive (`stdin().is_terminal()`),
   auto-creates when `AMD_YES=1`, and otherwise errors (never hangs

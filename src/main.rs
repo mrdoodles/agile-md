@@ -113,6 +113,12 @@ enum Cmd {
         #[arg(value_name = "REF")]
         task: Option<String>,
     },
+    /// Take a ticket off the board, into <board>/junk/
+    #[command(alias = "junk")]
+    Rm {
+        #[arg(value_name = "REF")]
+        task: Option<String>,
+    },
     /// Print a task
     Show {
         #[arg(value_name = "REF")]
@@ -314,6 +320,12 @@ fn run() -> Result<()> {
                 Some(column) => board.move_task(&task, column),
                 None => bail!("already in {}/", Column::Todo),
             }
+        }
+        Cmd::Rm { task } => {
+            let task = resolve(&board, task, "rm", &Column::ALL)?;
+            board.junk(&task)?;
+            println!("junked {} -> junk/", task.file_name());
+            Ok(())
         }
         Cmd::Show { task } => {
             let task = resolve(&board, task, "show", &Column::ALL)?;

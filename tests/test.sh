@@ -199,6 +199,23 @@ echo "quoting:"
 assert "a quote in the title is escaped, not left to break the frontmatter" \
   bash -c "grep -qF 'title: \"Fix the \\\"quoted\\\" thing\"' tasks/todo/*-fix-the-quoted-thing.md"
 
+echo "the junk drawer:"
+assert "init creates a junk drawer that keeps itself out of git" \
+  bash -c "test -f tasks/junk/.gitignore && grep -q '^\*$' tasks/junk/.gitignore"
+"${AMD}" new "Bin this one" >/dev/null
+git add -A; git commit -qm junkable
+assert "rm takes a ticket off the board" \
+  bash -c "'${AMD}' rm bin-this-one | grep -q 'junked'"
+assert "the ticket is in the junk drawer" test -f tasks/junk/*-bin-this-one.md
+assert "the board no longer shows it" \
+  bash -c "! '${AMD}' board --plain | grep -q 'Bin this one'"
+assert "git records the ticket leaving the board" \
+  bash -c "git status --porcelain | grep -q '^D  tasks/todo/.*bin-this-one'"
+assert "junk stays out of git" bash -c "! git status --porcelain | grep -q 'tasks/junk/0'"
+assert "a junked ticket is no longer findable" bash -c "! '${AMD}' show bin-this-one"
+assert "ids are not reused after junking" \
+  bash -c "before=\$(ls tasks/junk | head -1 | cut -d- -f1); '${AMD}' new 'After the bin' >/dev/null; ! test -f tasks/todo/\${before}-after-the-bin.md"
+
 echo "assignees:"
 assert "a new ticket is unassigned" \
   bash -c "grep -q '^assignee: \"\"$' tasks/*/001-first-task.md"

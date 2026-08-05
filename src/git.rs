@@ -109,6 +109,25 @@ pub fn switch_branch(repo: &Path, name: &str, create: bool) -> Result<()> {
     Ok(())
 }
 
+/// Drop a file from the index while leaving it on disk. Used when a ticket is
+/// junked: the junk directory is gitignored, so `git mv` would refuse, and the
+/// history should record the ticket leaving the board.
+pub fn untrack(repo: &Path, file: &Path) -> Result<()> {
+    let status = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["rm", "--cached", "--quiet", "--"])
+        .arg(file)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .context("running git rm --cached")?;
+    if !status.success() {
+        bail!("git rm --cached {} failed", file.display());
+    }
+    Ok(())
+}
+
 /// A `git config` value (used to fill `author` in task templates).
 pub fn config(key: &str) -> Option<String> {
     let out = Command::new("git")

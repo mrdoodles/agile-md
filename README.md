@@ -47,6 +47,7 @@ amd done  1                       # doing -> done
 amd back  1                       # move one column left
 amd show  publish                 # print a task (id or slug substring)
 amd edit  1                       # open in $EDITOR
+amd rm    1                       # take it off the board, into tasks/junk/
 amd link  1 3                     # relate two tickets
 ```
 
@@ -139,6 +140,25 @@ The branch name is written into the ticket at creation, so you can see it — an
 edit it — before any work starts. Because the title becomes a branch, it's
 **validated when you type it**: a title with nothing sluggable in it is rejected
 rather than producing a ticket that can never start.
+
+## The junk drawer
+
+`amd rm <ref>` takes a ticket off the board and into `tasks/junk/`:
+
+```bash
+amd rm 3            # junked 003-wrong-idea.md -> junk/
+amd rm wrong-idea   # by slug, like everything else
+```
+
+Nothing is deleted — the file is still there if you want it back
+(`mv tasks/junk/003-wrong-idea.md tasks/todo/`). The drawer keeps itself out of
+git: `tasks/junk/.gitignore` ignores its own contents, so a junked ticket leaves
+the history rather than lingering in it. For a ticket that was committed, that
+means `git rm --cached` and a move, which shows up as a deletion to commit like
+any other board change.
+
+Junked tickets **keep their ids**. The next new ticket won't reuse one, because
+`parent` and `related` elsewhere may still name it.
 
 ## Related tickets
 
