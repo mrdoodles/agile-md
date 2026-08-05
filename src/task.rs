@@ -68,6 +68,21 @@ impl Task {
             .unwrap_or_else(|| self.stem.clone())
     }
 
+    /// Who the ticket is assigned to, if anyone.
+    pub fn assignee(&self) -> Option<String> {
+        self.meta("assignee").filter(|who| !who.is_empty())
+    }
+
+    /// Assign the ticket, or clear it with an empty name.
+    pub fn assign(&self, who: &str) -> Result<()> {
+        let text = fs::read_to_string(&self.path)
+            .with_context(|| format!("reading {}", self.path.display()))?;
+        let quoted = format!("{:?}", who);
+        let updated = set_meta(&text, "assignee", &quoted)
+            .with_context(|| format!("updating {}", self.path.display()))?;
+        fs::write(&self.path, updated).with_context(|| format!("writing {}", self.path.display()))
+    }
+
     /// The `type` label, if the task carries one.
     pub fn kind(&self) -> Option<String> {
         self.meta("type").filter(|kind| !kind.is_empty())

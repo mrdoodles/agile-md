@@ -31,14 +31,19 @@ use ratatui_themes::{ThemeName, ThemePalette};
 
 use crate::board::{Board, Column};
 use crate::create::{Draft, NewTicket};
+use crate::registry::{Entry, Registry};
 use crate::task::Task;
 use crate::templates::{self, Templates};
 use crate::{branch, render};
 
 use settings::Settings;
 
-const HELP: &str = "j/k move  h/l column  [ ] shift  enter view  e edit  n new  s settings  q quit";
+const HELP: &str = "j/k move  h/l column  [ ] shift  enter view  e edit  n new  p repo  a assignee  s settings  q quit";
 const SETTINGS_BUTTON: &str = " settings ";
+/// The filter entry standing for "nobody has this one".
+const UNASSIGNED: &str = "(unassigned)";
+/// The filter entry standing for "all of them".
+const EVERYTHING: &str = "(all)";
 
 /// Open the board in the terminal. Returns when the user quits.
 pub fn run(board: Board) -> Result<()> {
@@ -78,14 +83,40 @@ enum Mode {
         selected: usize,
         previous: ThemeName,
     },
+    /// Pick which repository's board to look at, or all of them.
+    Repos {
+        selected: usize,
+    },
+    /// Pick whose tickets to look at, or everyone's.
+    Assignees {
+        selected: usize,
+    },
+}
+
+/// A ticket on the board, and which registered repository it belongs to —
+/// ids restart at 001 per repository, so a card without its origin is
+/// ambiguous the moment two boards are shown together.
+struct Card {
+    task: Task,
+    depth: usize,
+    repo: usize,
 }
 
 struct App {
     board: Board,
     templates: Templates,
     settings: Settings,
-    /// Flattened columns: the task and how deep it is nested.
-    columns: Vec<Vec<(Task, usize)>>,
+    /// Every repository whose board can be shown, the one you're standing in
+    /// first.
+    repos: Vec<Entry>,
+    /// Which repository is on show, or `None` for all of them.
+    repo: Option<usize>,
+    /// Whose tickets are on show, or `None` for everyone's.
+    assignee: Option<String>,
+    /// Everyone with a ticket anywhere in view, for the picker.
+    assignees: Vec<String>,
+    /// Flattened columns of cards.
+    columns: Vec<Vec<Card>>,
     /// Selection per column, so switching columns keeps your place.
     selected: Vec<usize>,
     column: usize,
@@ -101,10 +132,17 @@ struct App {
 impl App {
     fn new(board: Board) -> Result<App> {
         let templates = Templates::load(&board)?;
+        // The board you're standing in is always in the list, registered or
+        // not; the rest come from `amd repos`.
+        let repos = Registry::load().boards(Some(&board));
         let mut app = App {
             board,
             templates,
             settings: Settings::load(),
+            repos,
+            repo: None,
+            assignee: None,
+            assignees: Vec::new(),
             columns: Vec::new(),
             selected: vec![0; Column::ALL.len()],
             column: 0,
@@ -123,23 +161,68 @@ impl App {
         self.settings.theme.palette()
     }
 
-    /// Re-read the board. The files are the source of truth and something else
-    /// is probably editing them.
+    /// Re-read every repository in view. The files are the source of truth and
+    /// something else is probably editing them, so nothing is cached between
+    /// refreshes — a few directory listings is all this costs.
     fn reload(&mut self) -> Result<()> {
         self.templates = Templates::load(&self.board)?;
-        self.columns = Column::ALL
-            .into_iter()
-            .map(|column| {
-                Ok(render::flatten(&render::column_forest(
-                    &self.board,
-                    column,
-                )?))
-            })
-            .collect::<Result<Vec<_>>>()?;
-        for (index, tasks) in self.columns.iter().enumerate() {
-            self.selected[index] = self.selected[index].min(tasks.len().saturating_sub(1));
+        let showing: Vec<usize> = match self.repo {
+            Some(index) => vec![index],
+            None => (0..self.repos.len()).collect(),
+        };
+
+        let mut assignees: Vec<String> = Vec::new();
+        let mut columns: Vec<Vec<Card>> = Vec::new();
+        for column in Column::ALL {
+            let mut cards = Vec::new();
+            for repo in &showing {
+                let Some(entry) = self.repos.get(*repo) else {
+                    continue;
+                };
+                let board = entry.board();
+                let nodes = render::column_forest(&board, column)?;
+                for (task, depth) in render::flatten(&nodes) {
+                    if let Some(who) = task.assignee()
+                        && !assignees.contains(&who)
+                    {
+                        assignees.push(who);
+                    }
+                    if !self.wanted(&task) {
+                        continue;
+                    }
+                    cards.push(Card {
+                        task,
+                        depth,
+                        repo: *repo,
+                    });
+                }
+            }
+            columns.push(cards);
+        }
+        assignees.sort();
+        self.assignees = assignees;
+        self.columns = columns;
+        for (index, cards) in self.columns.iter().enumerate() {
+            self.selected[index] = self.selected[index].min(cards.len().saturating_sub(1));
         }
         Ok(())
+    }
+
+    /// Does this ticket pass the assignee filter?
+    fn wanted(&self, task: &Task) -> bool {
+        match &self.assignee {
+            None => true,
+            Some(who) if who == UNASSIGNED => task.assignee().is_none(),
+            Some(who) => task.assignee().as_deref() == Some(who.as_str()),
+        }
+    }
+
+    /// The board a card belongs to, for moving it.
+    fn board_of(&self, card: &Card) -> Board {
+        self.repos
+            .get(card.repo)
+            .map(|entry| entry.board())
+            .unwrap_or_else(|| Board::at(self.board.root.clone()))
     }
 
     fn run(&mut self, terminal: &mut DefaultTerminal) -> Result<()> {
@@ -155,11 +238,14 @@ impl App {
         Ok(())
     }
 
-    fn current(&self) -> Option<&Task> {
+    fn current(&self) -> Option<&Card> {
         self.columns
             .get(self.column)
-            .and_then(|tasks| tasks.get(self.selected[self.column]))
-            .map(|(task, _)| task)
+            .and_then(|cards| cards.get(self.selected[self.column]))
+    }
+
+    fn current_task(&self) -> Option<&Task> {
+        self.current().map(|card| &card.task)
     }
 
     fn key(&mut self, key: KeyEvent, terminal: &mut DefaultTerminal) -> Result<()> {
@@ -210,6 +296,36 @@ impl App {
                 }
                 _ => {}
             },
+            Mode::Repos { selected } => match key.code {
+                KeyCode::Esc => self.mode = Mode::Board,
+                KeyCode::Enter => {
+                    let chosen = *selected;
+                    self.choose_repo(chosen);
+                }
+                KeyCode::Char('j') | KeyCode::Down => {
+                    *selected = (*selected + 1) % (self.repos.len() + 1);
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    let count = self.repos.len() + 1;
+                    *selected = (*selected + count - 1) % count;
+                }
+                _ => {}
+            },
+            Mode::Assignees { selected } => match key.code {
+                KeyCode::Esc => self.mode = Mode::Board,
+                KeyCode::Enter => {
+                    let chosen = *selected;
+                    self.choose_assignee(chosen);
+                }
+                KeyCode::Char('j') | KeyCode::Down => {
+                    *selected = (*selected + 1) % (self.assignees.len() + 2);
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    let count = self.assignees.len() + 2;
+                    *selected = (*selected + count - 1) % count;
+                }
+                _ => {}
+            },
             Mode::Detail { scroll, .. } => match key.code {
                 KeyCode::Esc | KeyCode::Char('q') | KeyCode::Enter => self.mode = Mode::Board,
                 KeyCode::Char('j') | KeyCode::Down => *scroll = scroll.saturating_add(1),
@@ -230,6 +346,8 @@ impl App {
                     Ok("reloaded".to_string())
                 }),
                 KeyCode::Char('n') => self.open_new(),
+                KeyCode::Char('p') => self.open_repos(),
+                KeyCode::Char('a') => self.open_assignees(),
                 KeyCode::Char('s') => self.open_settings(),
                 KeyCode::Char('e') => self.edit(terminal)?,
                 KeyCode::Enter => self.open_detail(),
@@ -250,6 +368,10 @@ impl App {
                     *selected = (*selected + 1) % ThemeName::all().len();
                     self.preview();
                 }
+                Mode::Repos { selected } => *selected = (*selected + 1) % (self.repos.len() + 1),
+                Mode::Assignees { selected } => {
+                    *selected = (*selected + 1) % (self.assignees.len() + 2);
+                }
                 _ => self.move_selection(1),
             },
             MouseEventKind::ScrollUp => match &mut self.mode {
@@ -258,6 +380,14 @@ impl App {
                     let count = ThemeName::all().len();
                     *selected = (*selected + count - 1) % count;
                     self.preview();
+                }
+                Mode::Repos { selected } => {
+                    let count = self.repos.len() + 1;
+                    *selected = (*selected + count - 1) % count;
+                }
+                Mode::Assignees { selected } => {
+                    let count = self.assignees.len() + 2;
+                    *selected = (*selected + count - 1) % count;
                 }
                 _ => self.move_selection(-1),
             },
@@ -286,6 +416,20 @@ impl App {
                     *kind = (*kind + 1) % branch::ticket_types().len().max(1);
                 }
             }
+            Mode::Repos { .. } => {
+                if let Some(row) = row_in(self.dialog_area, at)
+                    && row <= self.repos.len()
+                {
+                    self.choose_repo(row);
+                }
+            }
+            Mode::Assignees { .. } => {
+                if let Some(row) = row_in(self.dialog_area, at)
+                    && row < self.assignees.len() + 2
+                {
+                    self.choose_assignee(row);
+                }
+            }
             Mode::Detail { .. } => {}
             Mode::Board => {
                 for index in 0..self.column_areas.len() {
@@ -310,7 +454,7 @@ impl App {
     }
 
     fn open_detail(&mut self) {
-        if let Some(task) = self.current() {
+        if let Some(task) = self.current_task() {
             match std::fs::read_to_string(&task.path) {
                 Ok(body) => self.mode = Mode::Detail { body, scroll: 0 },
                 Err(err) => self.status = format!("{err}"),
@@ -326,6 +470,58 @@ impl App {
                 .position(|kind| *kind == branch::default_type())
                 .unwrap_or(0),
         };
+    }
+
+    /// The repository picker: "all" first, then each registered board.
+    fn open_repos(&mut self) {
+        self.mode = Mode::Repos {
+            selected: self.repo.map(|index| index + 1).unwrap_or(0),
+        };
+    }
+
+    fn choose_repo(&mut self, row: usize) {
+        self.repo = (row > 0).then(|| row - 1);
+        let label = match self.repo.and_then(|index| self.repos.get(index)) {
+            Some(entry) => entry.name.clone(),
+            None => "all repositories".to_string(),
+        };
+        self.mode = Mode::Board;
+        self.attempt(move |app| {
+            app.reload()?;
+            Ok(format!("showing {label}"))
+        });
+    }
+
+    /// The assignee picker: everyone, then unassigned, then each name in view.
+    fn open_assignees(&mut self) {
+        let selected = match &self.assignee {
+            None => 0,
+            Some(who) if who == UNASSIGNED => 1,
+            Some(who) => self
+                .assignees
+                .iter()
+                .position(|name| name == who)
+                .map(|index| index + 2)
+                .unwrap_or(0),
+        };
+        self.mode = Mode::Assignees { selected };
+    }
+
+    fn choose_assignee(&mut self, row: usize) {
+        self.assignee = match row {
+            0 => None,
+            1 => Some(UNASSIGNED.to_string()),
+            other => self.assignees.get(other - 2).cloned(),
+        };
+        let label = self
+            .assignee
+            .clone()
+            .unwrap_or_else(|| "everyone".to_string());
+        self.mode = Mode::Board;
+        self.attempt(move |app| {
+            app.reload()?;
+            Ok(format!("showing {label}"))
+        });
     }
 
     fn open_settings(&mut self) {
@@ -365,9 +561,10 @@ impl App {
     /// Move the selected ticket a column left or right, following it with the
     /// cursor so the next keypress acts on the same task.
     fn shift(&mut self, by: i32) {
-        let Some(task) = self.current().cloned() else {
+        let Some(card) = self.current() else {
             return;
         };
+        let (task, board) = (card.task.clone(), self.board_of(card));
         let to = match (task.column, by) {
             (Column::Todo, 1) => Some(Column::Doing),
             (Column::Doing, 1) => Some(Column::Done),
@@ -380,7 +577,9 @@ impl App {
             return;
         };
         self.attempt(move |app| {
-            app.board.move_task(&task, to)?;
+            // Moving a card moves it in its own repository, not the one you
+            // happen to be standing in.
+            board.move_task(&task, to)?;
             app.reload()?;
             app.column = Column::ALL.iter().position(|c| *c == to).unwrap_or(0);
             Ok(format!("moved {} to {to}/", task.id_display()))
@@ -389,7 +588,7 @@ impl App {
 
     /// Hand the ticket to `$EDITOR`, giving the terminal back while it runs.
     fn edit(&mut self, terminal: &mut DefaultTerminal) -> Result<()> {
-        let Some(task) = self.current().cloned() else {
+        let Some(task) = self.current_task().cloned() else {
             return Ok(());
         };
         let editor = std::env::var("EDITOR")
@@ -483,6 +682,24 @@ impl App {
                 let selected = *selected;
                 self.draw_settings(frame, selected, &palette);
             }
+            Mode::Repos { selected } => {
+                let selected = *selected;
+                self.draw_picker(
+                    frame,
+                    " Repository ",
+                    selected,
+                    std::iter::once(EVERYTHING.to_string())
+                        .chain(self.repos.iter().map(|entry| entry.name.clone()))
+                        .collect(),
+                    &palette,
+                );
+            }
+            Mode::Assignees { selected } => {
+                let selected = *selected;
+                let mut choices = vec![EVERYTHING.to_string(), UNASSIGNED.to_string()];
+                choices.extend(self.assignees.clone());
+                self.draw_picker(frame, " Assignee ", selected, choices, &palette);
+            }
             Mode::Board => self.dialog_area = Rect::ZERO,
         }
     }
@@ -493,10 +710,23 @@ impl App {
             Layout::horizontal([Constraint::Min(0), Constraint::Length(button)]).areas(area);
         self.settings_area = settings;
 
+        let mut filters = Vec::new();
+        if let Some(entry) = self.repo.and_then(|index| self.repos.get(index)) {
+            filters.push(entry.name.clone());
+        } else if self.repos.len() > 1 {
+            filters.push(format!("{} repos", self.repos.len()));
+        }
+        if let Some(who) = &self.assignee {
+            filters.push(format!("@{who}"));
+        }
+        let filters = match filters.is_empty() {
+            true => String::new(),
+            false => format!("[{}]  ", filters.join(" ")),
+        };
         let message = if self.status.is_empty() {
-            HELP.to_string()
+            format!("{filters}{HELP}")
         } else {
-            format!("{}   —   {HELP}", self.status)
+            format!("{filters}{}   —   {HELP}", self.status)
         };
         let style = if self.status.starts_with("error:") {
             Style::new().fg(palette.error).bg(palette.bg)
@@ -520,6 +750,9 @@ impl App {
         let tasks = &self.columns[index];
         let active = index == self.column && matches!(self.mode, Mode::Board);
 
+        // With more than one repository in view an id alone is ambiguous, so
+        // each card says where it came from.
+        let show_repo = self.repo.is_none() && self.repos.len() > 1;
         let items: Vec<ListItem> = if tasks.is_empty() {
             vec![ListItem::new(Line::from(Span::styled(
                 "(empty)",
@@ -528,20 +761,31 @@ impl App {
         } else {
             tasks
                 .iter()
-                .map(|(task, depth)| {
+                .map(|card| {
+                    let task = &card.task;
                     let labels = labels(task);
-                    let mut spans = vec![
-                        Span::raw("  ".repeat(*depth)),
-                        Span::styled(
-                            format!("[{}] ", task.id_display()),
-                            Style::new().fg(palette.muted),
-                        ),
-                        Span::styled(task.title(), Style::new().fg(palette.fg)),
-                    ];
+                    let mut spans = vec![Span::raw("  ".repeat(card.depth))];
+                    if show_repo && let Some(entry) = self.repos.get(card.repo) {
+                        spans.push(Span::styled(
+                            format!("{} ", entry.name),
+                            Style::new().fg(palette.info),
+                        ));
+                    }
+                    spans.push(Span::styled(
+                        format!("[{}] ", task.id_display()),
+                        Style::new().fg(palette.muted),
+                    ));
+                    spans.push(Span::styled(task.title(), Style::new().fg(palette.fg)));
                     if !labels.is_empty() {
                         spans.push(Span::styled(
                             format!("  {labels}"),
                             Style::new().fg(palette.secondary),
+                        ));
+                    }
+                    if let Some(who) = task.assignee() {
+                        spans.push(Span::styled(
+                            format!("  @{who}"),
+                            Style::new().fg(palette.accent),
                         ));
                     }
                     ListItem::new(Line::from(spans))
@@ -585,7 +829,7 @@ impl App {
         self.dialog_area = area;
         frame.render_widget(Clear, area);
         let title = self
-            .current()
+            .current_task()
             .map(|task| format!(" [{}] {} ", task.id_display(), task.title()))
             .unwrap_or_else(|| " ticket ".to_string());
         frame.render_widget(
@@ -629,6 +873,36 @@ impl App {
                 )),
             area,
         );
+    }
+
+    /// One dialog shape for the repository and assignee pickers.
+    fn draw_picker(
+        &mut self,
+        frame: &mut Frame,
+        title: &str,
+        selected: usize,
+        choices: Vec<String>,
+        palette: &ThemePalette,
+    ) {
+        let area = centred(frame.area(), 46, 60);
+        self.dialog_area = area;
+        frame.render_widget(Clear, area);
+        let items: Vec<ListItem> = choices
+            .iter()
+            .map(|choice| {
+                ListItem::new(Line::from(Span::styled(
+                    choice.clone(),
+                    Style::new().fg(palette.fg),
+                )))
+            })
+            .collect();
+        let list = List::new(items)
+            .block(dialog(palette, title, " enter choose  esc cancel "))
+            .style(Style::new().bg(palette.bg))
+            .highlight_style(Style::new().bg(palette.selection).fg(palette.fg));
+        let mut state = ListState::default();
+        state.select(Some(selected.min(choices.len().saturating_sub(1))));
+        frame.render_stateful_widget(list, area, &mut state);
     }
 
     fn draw_settings(&mut self, frame: &mut Frame, selected: usize, palette: &ThemePalette) {

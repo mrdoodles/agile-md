@@ -32,6 +32,8 @@ pub struct NewTicket {
     pub template: String,
     /// Change type (`feat`, `fix`, …); ignored by templates that don't use it.
     pub kind: String,
+    /// Who to assign it to; empty for nobody.
+    pub assignee: String,
     /// A ref (id or slug) for the ticket this one sits under.
     pub parent: Option<String>,
     /// Refs for the tickets this one relates to.
@@ -145,6 +147,7 @@ impl Draft {
                 .as_ref()
                 .map(|task| task.stem.clone())
                 .unwrap_or_default(),
+            assignee: ticket.assignee,
             related: related.clone(),
             branch: branch_name.clone(),
             tags: ticket.tags,

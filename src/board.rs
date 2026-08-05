@@ -64,10 +64,18 @@ pub struct Board {
 }
 
 impl Board {
-    /// A board at an explicit path, for tests and for a GUI that was handed
-    /// one rather than discovering it.
+    /// A board at an explicit path, for tests and for a caller handed one
+    /// rather than discovering it.
     pub fn at(root: PathBuf) -> Board {
         Board { root }
+    }
+
+    /// The board inside a repository whose root we already know — a registered
+    /// one, rather than the repository we happen to be standing in.
+    pub fn in_repo(repo: &std::path::Path) -> Board {
+        Board {
+            root: repo.join(dir_name()),
+        }
     }
 }
 

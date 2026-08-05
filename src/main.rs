@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::fs;
 use std::io::{self, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
 use anyhow::{Context, Result, bail};
@@ -22,6 +22,7 @@ use clap_complete::Shell;
 
 use agile_md::board::{Board, Column};
 use agile_md::create::{Draft, NewTicket};
+use agile_md::registry::Registry;
 use agile_md::templates::{DEFAULT_TEMPLATE, TEMPLATE_SUFFIX, Templates};
 use agile_md::{branch, git, render, task, templates};
 
@@ -122,6 +123,19 @@ enum Cmd {
         #[arg(value_name = "REF")]
         task: Option<String>,
     },
+    /// Assign a ticket, or clear it with no name
+    Assign {
+        #[arg(value_name = "REF")]
+        task: String,
+        /// Who it belongs to; `@me` is your git user name, empty unassigns
+        #[arg(value_name = "WHO")]
+        who: Option<String>,
+    },
+    /// Register repositories so their boards can be seen together
+    Repos {
+        #[command(subcommand)]
+        command: Option<ReposCmd>,
+    },
     /// Link tickets together: both ends get the other in `related`
     Link {
         #[arg(value_name = "REF")]
@@ -158,6 +172,9 @@ struct NewArgs {
     /// The ticket this one sits under (an epic, a story, anything)
     #[arg(short = 'p', long, value_name = "REF")]
     parent: Option<String>,
+    /// Who to assign it to (defaults to nobody; --assignee @me is you)
+    #[arg(short = 'a', long, value_name = "WHO")]
+    assignee: Option<String>,
     /// Another ticket this one depends on or relates to (repeatable)
     #[arg(short = 'r', long = "related", value_name = "REF")]
     related: Vec<String>,
@@ -186,6 +203,22 @@ struct NewArgs {
     /// Create the ticket from the template without opening an editor
     #[arg(long, conflicts_with = "edit")]
     no_edit: bool,
+}
+
+#[derive(Subcommand, Debug)]
+enum ReposCmd {
+    /// List the registered repositories (the default)
+    List,
+    /// Register a repository; defaults to the one you're in
+    Add {
+        #[arg(value_name = "PATH")]
+        path: Option<PathBuf>,
+    },
+    /// Unregister a repository, by path or by name
+    Remove {
+        #[arg(value_name = "PATH|NAME")]
+        repo: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -282,6 +315,17 @@ fn run() -> Result<()> {
             open_editor(&task.path)
         }
         Cmd::Tui => cmd_tui(board),
+        Cmd::Assign { task, who } => {
+            let task = resolve(&board, Some(task), "assign", &Column::ALL)?;
+            let who = resolve_assignee(who.as_deref());
+            task.assign(&who)?;
+            match who.is_empty() {
+                true => println!("{} unassigned", task.id_display()),
+                false => println!("{} assigned to {who}", task.id_display()),
+            }
+            Ok(())
+        }
+        Cmd::Repos { command } => cmd_repos(command.unwrap_or(ReposCmd::List)),
         Cmd::Link { task, to, one_way } => cmd_link(&board, &task, &to, one_way),
         Cmd::Templates { command } => cmd_templates(&board, command.unwrap_or(TemplateCmd::List)),
     }
@@ -376,6 +420,66 @@ fn cmd_tui(board: Board) -> Result<()> {
 #[cfg(not(feature = "tui"))]
 fn cmd_tui(_board: Board) -> Result<()> {
     bail!("this build has no TUI — rebuild with --features tui")
+}
+
+/// The registry is a list of repositories, not a copy of their tickets: the
+/// markdown is the source of truth and it changes under you.
+fn cmd_repos(command: ReposCmd) -> Result<()> {
+    let mut registry = Registry::load();
+    match command {
+        ReposCmd::List => {
+            if registry.entries.is_empty() {
+                println!("(no repositories registered — add one with: amd repos add)");
+                return Ok(());
+            }
+            let width = registry
+                .entries
+                .iter()
+                .map(|entry| entry.name.len())
+                .max()
+                .unwrap_or(0);
+            for entry in &registry.entries {
+                let board = if entry.has_board() {
+                    ""
+                } else {
+                    "  (no board)"
+                };
+                println!("{:width$}  {}{board}", entry.name, entry.root.display());
+            }
+            Ok(())
+        }
+        ReposCmd::Add { path } => {
+            let path = match path {
+                Some(path) => path,
+                None => git::repo_root()
+                    .ok_or_else(|| anyhow::anyhow!("not inside a git repository"))?,
+            };
+            let added = registry.add(&path)?;
+            registry.save()?;
+            match added {
+                true => println!("registered {}", path.display()),
+                false => println!("{} was already registered", path.display()),
+            }
+            Ok(())
+        }
+        ReposCmd::Remove { repo } => {
+            if !registry.remove(&repo) {
+                bail!("'{repo}' is not registered");
+            }
+            registry.save()?;
+            println!("unregistered {repo}");
+            Ok(())
+        }
+    }
+}
+
+/// `@me` is whoever git says you are — the name that ends up in the commits.
+fn resolve_assignee(who: Option<&str>) -> String {
+    match who {
+        Some("@me") => git::config("user.name").unwrap_or_else(|| "me".to_string()),
+        Some(who) => who.trim().to_string(),
+        None => String::new(),
+    }
 }
 
 /// Open the board, offering to create one when it isn't there: prompt when
@@ -512,6 +616,7 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
         &templates,
         NewTicket {
             title,
+            assignee: resolve_assignee(args.assignee.as_deref()),
             template,
             kind,
             parent,

@@ -13,6 +13,10 @@
 set -uo pipefail
 
 export AMD_NO_INPUT=1
+# Keep the suite away from the real registry and theme: `amd repos add` writes
+# to the config directory, and a test must never touch the user's.
+XDG_CONFIG_HOME="$(mktemp -d)/config"
+export XDG_CONFIG_HOME
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -194,6 +198,31 @@ echo "quoting:"
 "${AMD}" new 'Fix the "quoted" thing' >/dev/null
 assert "a quote in the title is escaped, not left to break the frontmatter" \
   bash -c "grep -qF 'title: \"Fix the \\\"quoted\\\" thing\"' tasks/todo/*-fix-the-quoted-thing.md"
+
+echo "assignees:"
+assert "a new ticket is unassigned" \
+  bash -c "grep -q '^assignee: \"\"$' tasks/*/001-first-task.md"
+"${AMD}" new "Assigned at creation" -a alex >/dev/null
+assert "--assignee sets it at creation" \
+  bash -c "grep -q '^assignee: \"alex\"$' tasks/todo/*-assigned-at-creation.md"
+assert "amd assign sets it afterwards" \
+  bash -c "'${AMD}' assign 1 sam >/dev/null && grep -q '^assignee: \"sam\"$' tasks/*/001-first-task.md"
+assert "amd assign with no name clears it" \
+  bash -c "'${AMD}' assign 1 >/dev/null && grep -q '^assignee: \"\"$' tasks/*/001-first-task.md"
+assert "@me resolves to the git user" \
+  bash -c "'${AMD}' assign 1 @me >/dev/null && grep -q '^assignee: \"t\"$' tasks/*/001-first-task.md"
+
+echo "repositories:"
+assert "an empty registry says so" bash -c "'${AMD}' repos | grep -q 'no repositories registered'"
+assert "the current repository can be registered" \
+  bash -c "'${AMD}' repos add | grep -q 'registered'"
+assert "registering lists it by name" bash -c "'${AMD}' repos | grep -q \"$(basename "${tmp}")\""
+assert "registering twice is a no-op" bash -c "'${AMD}' repos add | grep -q 'already registered'"
+assert "a non-repository is refused" \
+  bash -c "'${AMD}' repos add '${nongit}' 2>&1 | grep -q 'not a git repository'"
+assert "unregistering by name works" \
+  bash -c "'${AMD}' repos remove \"$(basename "${tmp}")\" | grep -q 'unregistered'"
+assert "unregistering something unknown fails" bash -c "! '${AMD}' repos remove nope"
 
 echo "related tickets:"
 assert "related is empty by default" \

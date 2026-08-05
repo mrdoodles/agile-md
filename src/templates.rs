@@ -72,6 +72,8 @@ pub struct TaskContext {
     /// Type label — also the branch prefix (`feature`, `bugfix`, …).
     #[serde(rename = "type")]
     pub kind: String,
+    /// Who the ticket is assigned to, or an empty string.
+    pub assignee: String,
     /// Id of this ticket's parent, or an empty string. One field instead of
     /// epic/story: nesting gives you those, and any depth beyond them.
     pub parent: String,
@@ -408,6 +410,7 @@ mod tests {
             title: "First task".to_string(),
             slug: "first-task".to_string(),
             kind: "feat".to_string(),
+            assignee: "tim".to_string(),
             parent: "002".to_string(),
             parent_link: "002-checkout".to_string(),
             related: vec!["003".to_string()],
@@ -434,6 +437,7 @@ mod tests {
         assert!(rendered.contains("\nid: \"001\"\n"), "{rendered}");
         assert!(rendered.contains("\ntitle: \"First task\"\n"), "{rendered}");
         assert!(rendered.contains("\ntype: \"feat\"\n"), "{rendered}");
+        assert!(rendered.contains("\nassignee: \"tim\"\n"), "{rendered}");
         assert!(rendered.contains("\nparent: \"002\"\n"), "{rendered}");
         assert!(rendered.contains("[[002-checkout]]"), "{rendered}");
         assert!(

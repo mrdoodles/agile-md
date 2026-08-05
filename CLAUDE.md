@@ -180,11 +180,27 @@ one implementation of the board.
 - Custom `yaml` filter quotes/escapes frontmatter values, so a title containing
   `"` can't corrupt the block. Use it for every frontmatter value.
 - `TaskContext` is the contract with templates (`id`, `number`, `title`, `slug`,
-  `type`, `parent`, `parent_link`, `related`, `branch`, `tags`, `created`, `timestamp`, `column`,
+  `type`, `assignee`, `parent`, `parent_link`, `related`, `branch`, `tags`, `created`, `timestamp`, `column`,
   `author`, `email`, `board`, `template`, `extra`). Adding a field is additive;
   renaming one breaks every user template — treat it as a public API.
 - Template errors are flattened by `render_error()` (message + line + cause
   chain + MiniJinja debug info); without that only the top line survives.
+
+## Several repositories (`src/registry.rs`)
+
+- The registry is **a list of repository paths and nothing else**, one per line
+  at `$XDG_CONFIG_HOME/agile-md/repos`. There is deliberately no store of
+  tickets: the markdown is the source of truth, it changes under you on every
+  checkout and pull, and an index would be stale the moment it was written.
+  Reading a board is a directory listing and a few small files.
+- `Registry::boards()` always includes the repository you're standing in, listed
+  or not — you should never open the TUI and not see the board you're in.
+- Ids restart at 001 in every repository, so a `Card` carries which repo it came
+  from; the TUI shows the name whenever more than one board is in view, and a
+  move goes through *that* repository's `Board`, not the current one.
+- `load_from`/`save_to` take a path, so tests need no environment mutation. The
+  CLI suite sets `XDG_CONFIG_HOME` to a temp dir — `amd repos add` writes to the
+  config directory and a test must never touch the user's.
 
 ## The terminal UI (`src/tui/`)
 

@@ -84,6 +84,7 @@ On top of the ticket type:
 | -------- | ----------- | ---------------------------------------------------------- |
 | `type`   | development | conventional-commit types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert` (default `feat`; the list is `AMD_TYPES`) |
 | `parent` | both        | the ticket this one sits under — optional, and any depth     |
+| `assignee` | both      | who it belongs to — optional, `@me` resolves to your git name |
 | `tags`   | both        | free-form, completed against the tags already on the board   |
 
 **One `parent` instead of epic and story fields.** Nesting gives you both, and
@@ -162,6 +163,46 @@ related: [001,002]
 Prose can still point at tickets with `[[NNN-slug]]` wikilinks; `related` is for
 the dependency itself.
 
+## Several repositories at once
+
+Register the repositories you work in, and the TUI shows their boards together:
+
+```bash
+amd repos add                 # the one you're standing in
+amd repos add ../other-repo
+amd repos                     # what's registered
+amd repos remove other-repo   # by name or by path
+```
+
+In the TUI, `p` picks a repository (or all of them) and `a` picks an assignee
+(or everyone, or unassigned). With more than one board in view each card says
+which repository it came from, since ids restart at 001 in every repo.
+
+The registry is a **list of repositories, and nothing else** — one path per line
+in `~/.config/agile-md/repos`:
+
+```
+# Repositories agile-md knows about, one path per line.
+/Users/you/code/agile-md
+/Users/you/code/other-repo
+```
+
+The tickets themselves are never copied into a store. They're markdown in each
+repo, they change when you check out a branch or pull someone's work, and an
+index of them would be wrong the moment it was written. Reading a board is a
+directory listing and a few small files.
+
+## Assignees
+
+```bash
+amd new "Add login" --assignee alex   # or -a @me for whoever git says you are
+amd assign 3 sam                      # assign an existing ticket
+amd assign 3                          # unassign it
+```
+
+The name lands in the ticket's frontmatter (`assignee: "sam"`) and shows on the
+board as `@sam`, so it moves with the file and is visible in the diff.
+
 ## The terminal UI
 
 `amd tui` opens the board full-screen in the terminal — the only front end, and
@@ -174,7 +215,7 @@ it works over SSH):
 │   [002] Guest checkout││                       ││                       │
 │ [003] Renew certs  ad ││                       ││                       │
 └───────────────────────┘└───────────────────────┘└───────────────────────┘
-j/k move  h/l column  [ ] shift  enter view  e edit  n new  s settings  q quit
+j/k move  h/l column  [ ] shift  enter view  e edit  n new  p repo  a assignee  s settings  q quit
 ```
 
 | | |
@@ -183,6 +224,8 @@ j/k move  h/l column  [ ] shift  enter view  e edit  n new  s settings  q quit
 | `[` `]` | shift the selected ticket a column left or right |
 | `enter` | read the ticket; `e` opens it in `$EDITOR` |
 | `n` | new ticket — a title and a type, nothing else to fill in |
+| `p` | which repository (or all of them) |
+| `a` | whose tickets (or everyone's, or unassigned) |
 | `s` | settings |
 | `r`, `q` | reload, quit |
 
