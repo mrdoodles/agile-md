@@ -12,9 +12,9 @@ no daemon, no database.
   is consistent by construction and yours to change.
 - **The template is the form.** Leave an argument out in a terminal and `amd`
   asks — including the fields your own template declares.
-- **Two ticket types.** Development work is tracked on a branch named from its
-  conventional-commit type — `amd start` puts you on `feature/add-login`. Admin
-  work gets no branch. Both take optional `epic` and `story` labels.
+- **One type per ticket.** `admin`, or the conventional-commit type of the
+  change it makes. Development work is tracked on a branch named from that type
+  — `amd start` puts you on `feature/add-login` — and admin work gets none.
 - **One command, any repo.** Install `amd` once on your PATH; it finds the
   board at `<repository-root>/tasks` from wherever you are.
 
@@ -55,23 +55,26 @@ Set `AMD_DIR` to use a board directory other than `tasks`.
 
 ## Ticket types
 
-Two kinds of ticket, each a template:
+A ticket's `type` is one field with one list: **`admin`**, or the
+conventional-commit type of the change it makes.
 
-| Ticket type   | Branch?                              | Frontmatter                        |
-| ------------- | ------------------------------------ | ---------------------------------- |
-| `development` | yes — `<prefix>/<title>`             | `type`, `branch`, epic, story, tags |
-| `admin`       | no — a rota or a renewal has nothing to check out | epic, story, tags     |
+| type | branch | frontmatter |
+| --- | --- | --- |
+| `admin` | none — a rota or a renewal has nothing to check out | no `type`, no `branch` |
+| `feat` `fix` `docs` `style` `refactor` `perf` `test` `build` `ci` `chore` `revert` | `<prefix>/<title>` | `type`, `branch` |
 
 ```bash
-amd new "Add login"                          # development, the default
-amd new "Renew the certificates" -T admin    # admin
-amd start 1                                  # development: switches to feature/add-login
-amd start 2                                  # admin: "admin tickets don't use branches"
+amd new "Add login"                        # feat, the default
+amd new "Renew the certificates" --type admin
+amd start 1                                # development: switches to feature/add-login
+amd start 2                                # admin: "admin tickets don't use branches"
 ```
 
-The rule lives in the template, not in a flag: a ticket type whose template
-records a `branch` gets one. Your own template opts in the same way, just by
-using the variable.
+Which template renders a ticket follows from the type — `admin` gets the admin
+template, everything else the development one — so there is nothing else to
+choose. `--template` still overrides it for a board with templates of its own,
+and the rule for whether a branch appears lives in the template: one that
+records a `branch` gets one.
 
 ## Labels and nesting
 
@@ -158,6 +161,45 @@ related: [001,002]
 
 Prose can still point at tickets with `[[NNN-slug]]` wikilinks; `related` is for
 the dependency itself.
+
+## The terminal UI
+
+`amd tui` opens the board full-screen in the terminal — the only front end, and
+the one that costs nothing to leave open (2 MB resident, no CPU while idle, and
+it works over SSH):
+
+```
+┌ TODO  (3) ────────────┐┌ DOING  (1) ───────────┐┌ DONE  (0) ────────────┐
+│ [001] Checkout revamp ││ [004] Fix the thing   ││ (empty)               │
+│   [002] Guest checkout││                       ││                       │
+│ [003] Renew certs  ad ││                       ││                       │
+└───────────────────────┘└───────────────────────┘└───────────────────────┘
+j/k move  h/l column  [ ] shift  enter view  e edit  n new  s settings  q quit
+```
+
+| | |
+| --- | --- |
+| `j`/`k`, `h`/`l` | move within and between columns (arrows work too) |
+| `[` `]` | shift the selected ticket a column left or right |
+| `enter` | read the ticket; `e` opens it in `$EDITOR` |
+| `n` | new ticket — a title and a type, nothing else to fill in |
+| `s` | settings |
+| `r`, `q` | reload, quit |
+
+**The mouse works**: click a ticket to select it, click it again to open it,
+scroll to move through a column, and click **settings** in the bottom-right.
+
+**Themes** come from [ratatui-themes](https://crates.io/crates/ratatui-themes)
+— Dracula, Nord, Gruvbox, Catppuccin and the rest. The settings dialog previews
+each one as you move through the list, `enter` keeps it and `esc` puts the old
+one back. Your choice is remembered in `~/.config/agile-md/config`:
+
+```
+theme = nord
+```
+
+The TUI is a default feature; `--no-default-features` builds the CLI alone,
+which is what CI and scripts want.
 
 ## Shell completion
 

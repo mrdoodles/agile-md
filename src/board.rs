@@ -11,7 +11,6 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result, anyhow, bail};
 
-use crate::form;
 use crate::git;
 use crate::task::Task;
 use crate::templates;
@@ -65,6 +64,14 @@ pub struct Board {
 }
 
 impl Board {
+    /// A board at an explicit path, for tests and for a GUI that was handed
+    /// one rather than discovering it.
+    pub fn at(root: PathBuf) -> Board {
+        Board { root }
+    }
+}
+
+impl Board {
     /// Where the board *would* live for the current directory. Does not
     /// require it to exist — `amd init` needs the path before the directory.
     pub fn locate() -> Result<Board> {
@@ -77,31 +84,17 @@ impl Board {
         })
     }
 
-    /// Resolve the board, offering to create it when it doesn't exist: prompt
-    /// when interactive, create outright with `AMD_YES=1`, and otherwise fail
-    /// with a clear message — never block waiting on a pipe.
-    pub fn ensure() -> Result<Board> {
+    /// Open an existing board, or say where it should have been. Creating one
+    /// is a decision for the caller — the CLI asks, the GUI offers a button.
+    pub fn open() -> Result<Board> {
         let board = Board::locate()?;
         if board.root.is_dir() {
             return Ok(board);
         }
-        let create = if env::var("AMD_YES").as_deref() == Ok("1") {
-            true
-        } else if form::available() {
-            eprintln!("No task board found at {}", board.root.display());
-            form::confirm("Create an empty board here?")?
-        } else {
-            bail!(
-                "no board at {} — run 'amd init' (or set AMD_YES=1)",
-                board.root.display()
-            );
-        };
-        if !create {
-            bail!("no board created");
-        }
-        board.create()?;
-        eprintln!("Created board at {}", board.root.display());
-        Ok(board)
+        bail!(
+            "no board at {} — run 'amd init' (or set AMD_YES=1)",
+            board.root.display()
+        )
     }
 
     /// The board directory's name (`tasks`), for display and templates.

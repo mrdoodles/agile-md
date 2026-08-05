@@ -48,25 +48,44 @@ fn hyperlinks() -> bool {
 
 /// One task and the tasks nested under it. The parent id is read once, when
 /// the column is loaded, rather than on every lookup — each read is a file read.
-struct Node {
-    task: Task,
-    parent: Option<String>,
-    children: Vec<Node>,
+pub struct Node {
+    pub task: Task,
+    pub parent: Option<String>,
+    pub children: Vec<Node>,
+}
+
+/// Read a column and nest it, reading each task's parent exactly once.
+pub fn column_forest(board: &Board, column: Column) -> Result<Vec<Node>> {
+    let with_parents = board
+        .tasks_in(column)?
+        .into_iter()
+        .map(|task| {
+            let parent = task.parent();
+            (task, parent)
+        })
+        .collect();
+    Ok(forest(with_parents))
+}
+
+/// Flatten a nested column into `(task, depth)` pairs, depth-first — the shape
+/// a list widget wants, from the same tree the terminal board draws.
+pub fn flatten(nodes: &[Node]) -> Vec<(Task, usize)> {
+    fn walk(nodes: &[Node], depth: usize, out: &mut Vec<(Task, usize)>) {
+        for node in nodes {
+            out.push((node.task.clone(), depth));
+            walk(&node.children, depth + 1, out);
+        }
+    }
+    let mut out = Vec::new();
+    walk(nodes, 0, &mut out);
+    out
 }
 
 /// Print one or more columns of the board.
 pub fn columns(board: &Board, columns: &[Column]) -> Result<()> {
     let mut loaded = Vec::new();
     for column in columns {
-        let tasks = board.tasks_in(*column)?;
-        let with_parents = tasks
-            .into_iter()
-            .map(|task| {
-                let parent = task.parent();
-                (task, parent)
-            })
-            .collect();
-        loaded.push((*column, forest(with_parents)));
+        loaded.push((*column, column_forest(board, *column)?));
     }
     if rich() {
         // Falling back rather than failing: a rendering problem should never
@@ -84,7 +103,7 @@ pub fn columns(board: &Board, columns: &[Column]) -> Result<()> {
 /// A task whose parent is in another column stays at the top level here — the
 /// columns are the board's primary structure — but keeps a `^NNN` marker so
 /// the relationship is still visible.
-fn forest(tasks: Vec<(Task, Option<String>)>) -> Vec<Node> {
+pub fn forest(tasks: Vec<(Task, Option<String>)>) -> Vec<Node> {
     let ids: Vec<String> = tasks.iter().map(|(task, _)| task.id_display()).collect();
     let mut nodes: Vec<Option<Node>> = tasks
         .into_iter()

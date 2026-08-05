@@ -18,8 +18,8 @@ use inquire::autocompletion::{Autocomplete, Replacement};
 use inquire::validator::Validation;
 use inquire::{Confirm, CustomUserError, InquireError, Select, Text};
 
-use crate::branch;
-use crate::task::Task;
+use agile_md::branch;
+use agile_md::task::Task;
 
 static NO_INPUT: OnceLock<bool> = OnceLock::new();
 

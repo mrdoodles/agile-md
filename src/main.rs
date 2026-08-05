@@ -4,14 +4,8 @@
 //! `<repo-root>/tasks`. Status is the folder; `git mv` is the audit trail; the
 //! ticket format is a MiniJinja template you can edit.
 
-mod board;
-mod branch;
 mod completions;
 mod form;
-mod git;
-mod render;
-mod task;
-mod templates;
 mod value;
 
 use std::collections::BTreeMap;
@@ -26,8 +20,10 @@ use clap::builder::PossibleValuesParser;
 use clap::{Args, CommandFactory, Parser, Subcommand};
 use clap_complete::Shell;
 
-use board::{Board, Column};
-use templates::{DEFAULT_TEMPLATE, TEMPLATE_SUFFIX, TaskContext, Templates};
+use agile_md::board::{Board, Column};
+use agile_md::create::{Draft, NewTicket};
+use agile_md::templates::{DEFAULT_TEMPLATE, TEMPLATE_SUFFIX, Templates};
+use agile_md::{branch, git, render, task, templates};
 
 const AFTER_HELP: &str = "\
 A <REF> is a task id (e.g. 7 or 007) or a unique slug substring. Leave it out
@@ -136,6 +132,8 @@ enum Cmd {
         #[arg(long)]
         one_way: bool,
     },
+    /// Open the board in the terminal (needs the `tui` feature)
+    Tui,
     /// Print a shell completion script (bash, zsh, fish, …)
     Completions {
         /// Shell to generate for; defaults to $SHELL
@@ -210,6 +208,15 @@ enum TemplateCmd {
 }
 
 fn main() -> ExitCode {
+    // Behave like a normal Unix tool when the reader goes away — `amd board |
+    // head` is an ordinary thing to do. Rust ignores SIGPIPE by default, which
+    // turns a closed pipe into a panic on the next print rather than a quiet
+    // exit.
+    #[cfg(unix)]
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
+
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
@@ -238,7 +245,7 @@ fn run() -> Result<()> {
         return Ok(());
     }
 
-    let board = Board::ensure()?;
+    let board = ensure_board()?;
     match command {
         Cmd::Init | Cmd::Completions { .. } => unreachable!("handled above"),
         Cmd::New(args) => cmd_new(&board, args),
@@ -274,6 +281,7 @@ fn run() -> Result<()> {
             let task = resolve(&board, task, "edit", &Column::ALL)?;
             open_editor(&task.path)
         }
+        Cmd::Tui => cmd_tui(board),
         Cmd::Link { task, to, one_way } => cmd_link(&board, &task, &to, one_way),
         Cmd::Templates { command } => cmd_templates(&board, command.unwrap_or(TemplateCmd::List)),
     }
@@ -360,6 +368,40 @@ fn cmd_link(board: &Board, reference: &str, to: &[String], one_way: bool) -> Res
     Ok(())
 }
 
+#[cfg(feature = "tui")]
+fn cmd_tui(board: Board) -> Result<()> {
+    agile_md::tui::run(board)
+}
+
+#[cfg(not(feature = "tui"))]
+fn cmd_tui(_board: Board) -> Result<()> {
+    bail!("this build has no TUI — rebuild with --features tui")
+}
+
+/// Open the board, offering to create one when it isn't there: prompt when
+/// interactive, create outright with `AMD_YES=1`, and otherwise fail with a
+/// clear message — never block waiting on a pipe.
+fn ensure_board() -> Result<Board> {
+    let board = Board::locate()?;
+    if board.root.is_dir() {
+        return Ok(board);
+    }
+    let create = if std::env::var("AMD_YES").as_deref() == Ok("1") {
+        true
+    } else if form::available() {
+        eprintln!("No task board found at {}", board.root.display());
+        form::confirm("Create an empty board here?")?
+    } else {
+        return Board::open();
+    };
+    if !create {
+        bail!("no board created");
+    }
+    board.create()?;
+    eprintln!("Created board at {}", board.root.display());
+    Ok(board)
+}
+
 /// Resolve a task reference, or offer a picker when it was left out.
 fn resolve(
     board: &Board,
@@ -401,47 +443,26 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
     };
     branch::validate_sluggable(&title)?;
 
-    // Then the ticket type. Development work is tracked on a branch; admin
-    // work (a rota, a renewal, an approval) has nothing to check out.
-    let template = if full_form {
-        let choices = templates.task_templates();
-        if choices.len() > 1 {
-            form::select("Ticket type:", choices, &args.template)?
-        } else {
-            args.template.clone()
+    // One question, not two: a ticket's type is `admin` or the change it
+    // makes, and that single answer picks the template as well.
+    let chosen = match args.r#type {
+        Some(chosen) => chosen,
+        None if full_form => {
+            form::select("Type:", branch::ticket_types(), &branch::default_type())?
         }
+        None => branch::default_type(),
+    };
+    let (derived, kind) = branch::resolve(&chosen);
+    // An explicit --template still wins, for a board with templates of its own.
+    let template = if args.template == DEFAULT_TEMPLATE {
+        derived
     } else {
         args.template.clone()
     };
 
-    // Whether this ticket gets a branch is the template's call: one that
-    // records a `branch` needs a commit type to name it, one that doesn't
-    // never asks.
-    let branched = templates.branches(&template)?;
-    // A template that shows a change type gets asked for one even when it
-    // records no branch; a branch needs a type to name it either way.
-    let wants_type = branched || templates.uses(&template, "type")?;
-    let kind = if wants_type {
-        match args.r#type {
-            Some(kind) => {
-                branch::validate_type(&kind)?;
-                kind
-            }
-            None if full_form => form::select("Change:", branch::types(), &branch::default_type())?,
-            None => branch::default_type(),
-        }
-    } else {
-        String::new()
-    };
-    let branch_name = if branched {
-        branch::for_title(&kind, &title)?
-    } else {
-        String::new()
-    };
-
     // One parent instead of epic and story: nesting gives both, and any depth
-    // past them. Resolved to an id now, so a typo can't become a dangling link.
-    let parent_ref = match args.parent {
+    // past them.
+    let parent = match args.parent {
         Some(parent) => Some(parent),
         None if full_form => {
             let answer = form::label(
@@ -454,33 +475,12 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
         }
         None => None,
     };
-    let parent_task = match &parent_ref {
-        Some(reference) => Some(board.find(reference)?),
-        None => None,
-    };
-    let parent = parent_task
-        .as_ref()
-        .map(|task| task.id_display())
-        .unwrap_or_default();
-    let parent_link = parent_task
-        .as_ref()
-        .map(|task| task.stem.clone())
-        .unwrap_or_default();
 
-    // Related tickets are recorded as ids, so a link survives a task being
-    // renamed or moved between columns. Refs are resolved now: a typo is an
-    // error here rather than a dangling link discovered later.
-    let related_refs = if full_form && args.related.is_empty() {
+    let related = if full_form && args.related.is_empty() {
         form::related("", board.stems()?)?
     } else {
         args.related
     };
-    let mut related = Vec::new();
-    for reference in &related_refs {
-        related.push(board.find(reference)?.id_display());
-    }
-    related.sort();
-    related.dedup();
 
     let tags = if full_form {
         form::tags(&args.tags.join(", "), board.tags()?)?
@@ -507,39 +507,19 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
         }
     }
 
-    let number = board.next_id()?;
-    let id = format!("{number:03}");
-    let slug = task::slugify(&title);
-    let dir = board.dir(Column::Todo);
-    fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
-    let path = dir.join(format!("{id}-{slug}.md"));
-    if path.exists() {
-        bail!("{} already exists", path.display());
-    }
-
-    let (created, timestamp) = templates::today();
-    let context = TaskContext {
-        id: id.clone(),
-        number,
-        title,
-        slug: slug.clone(),
-        kind,
-        parent,
-        parent_link,
-        related: related.clone(),
-        branch: branch_name.clone(),
-        tags,
-        created,
-        timestamp,
-        column: Column::Todo.to_string(),
-        author: git::config("user.name").unwrap_or_else(|| "unknown".to_string()),
-        email: git::config("user.email").unwrap_or_default(),
-        board: board.name(),
-        template: template.clone(),
-        extra,
-    };
-
-    let rendered = templates.render(&template, &context)?;
+    let draft = Draft::prepare(
+        board,
+        &templates,
+        NewTicket {
+            title,
+            template,
+            kind,
+            parent,
+            related,
+            tags,
+            extra,
+        },
+    )?;
 
     // The form doesn't stop at the metadata: unless told otherwise, it opens
     // the rendered ticket so the notes and checklist are filled in as part of
@@ -547,36 +527,26 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
     // the edit leaves no half-made task behind.
     let edit = !args.no_edit && form::available() && (args.edit || full_form);
     let body = if edit {
-        form::body(&rendered, OsStr::new(&editor_command()))?
+        Some(form::body(&draft.body, OsStr::new(&editor_command()))?)
     } else {
-        rendered
+        None
     };
 
-    fs::write(&path, body).with_context(|| format!("writing {}", path.display()))?;
-
-    // The parent lists its children, so navigation works from either end.
-    if let Some(parent) = &parent_task
-        && parent.add_child_link(&format!("{id}-{slug}"))?
-    {
-        println!("{} children: {id}", parent.id_display());
-    }
-
-    // Backlink: "related" reads the same from either end, so the tickets this
-    // one names get it back rather than the link depending on which ticket you
-    // happened to be standing on.
-    for reference in &related {
-        let other = board.find(reference)?;
-        if other.add_related(std::slice::from_ref(&id))? {
-            println!("{} related: {id}", other.id_display());
-        }
-    }
-
-    let note = if branch_name.is_empty() {
+    let note = if draft.branch.is_empty() {
         String::new()
     } else {
-        format!(" ({branch_name})")
+        format!(" ({})", draft.branch)
     };
-    println!("created {}/{id}-{slug}.md{note}", Column::Todo);
+    let name = draft
+        .path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let created = draft.write(board, body)?;
+    for id in &created.linked {
+        println!("{id} now links to {}", created.task.id_display());
+    }
+    println!("created {}/{name}{note}", Column::Todo);
     Ok(())
 }
 

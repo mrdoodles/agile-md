@@ -11,9 +11,9 @@ use clap::builder::{PossibleValue, TypedValueParser};
 use clap::error::ErrorKind;
 use clap::{Arg, Command, Error};
 
-use crate::{branch, templates};
+use agile_md::{branch, templates};
 
-/// The `--type` label: one of the board's change types.
+/// The `--type` label: `admin`, or one of the board's change types.
 #[derive(Clone, Copy, Debug)]
 pub struct ChangeType;
 
@@ -28,14 +28,14 @@ impl TypedValueParser for ChangeType {
     ) -> Result<String, Error> {
         let value = value.to_string_lossy().into_owned();
         // Our own message: it names the offending value and points at AMD_TYPES.
-        branch::validate_type(&value)
+        branch::validate_ticket_type(&value)
             .map_err(|err| Error::raw(ErrorKind::InvalidValue, format!("{err}\n")))?;
         Ok(value)
     }
 
     fn possible_values(&self) -> Option<Box<dyn Iterator<Item = PossibleValue> + '_>> {
         Some(Box::new(
-            branch::types().into_iter().map(PossibleValue::new),
+            branch::ticket_types().into_iter().map(PossibleValue::new),
         ))
     }
 }
@@ -78,8 +78,9 @@ mod tests {
     }
 
     #[test]
-    fn change_types_offer_the_conventional_list() {
+    fn types_offer_admin_and_the_conventional_list() {
         let offered = values(&ChangeType);
+        assert!(offered.contains(&"admin".to_string()), "{offered:?}");
         assert!(offered.contains(&"feat".to_string()), "{offered:?}");
         assert!(offered.contains(&"revert".to_string()), "{offered:?}");
     }
@@ -87,10 +88,10 @@ mod tests {
     #[test]
     fn change_types_are_validated_with_our_message() {
         let err = ChangeType
-            .parse_ref(&Command::new("amd"), None, OsStr::new("feature"))
+            .parse_ref(&Command::new("amd"), None, OsStr::new("development"))
             .unwrap_err()
             .to_string();
-        assert!(err.contains("unknown type 'feature'"), "{err}");
+        assert!(err.contains("unknown type 'development'"), "{err}");
         assert!(err.contains("AMD_TYPES"), "{err}");
     }
 

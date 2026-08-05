@@ -10,6 +10,10 @@ readme = "README.md"
 keywords = ["kanban", "tasks", "markdown", "cli", "git"]
 categories = ["command-line-utilities"]
 
+[lib]
+name = "agile_md"
+path = "src/lib.rs"
+
 [[bin]]
 name = "amd"
 path = "src/main.rs"
@@ -23,7 +27,19 @@ tempfile = "3"
 richrs = "0.2"
 serde = { version = "1", features = ["derive"] }
 time = { version = "0.3", features = ["formatting", "local-offset", "macros"] }
+
+# GUI only — see the [features] section.
 clap_complete = "4"
+ratatui = { version = "0.30", optional = true }
+ratatui-themes = { version = "0.3", optional = true }
+libc = "0.2.189"
+
+[features]
+# The terminal front end is on by default: it's the only one, and a build
+# without it can't show you the board. `--no-default-features` drops it and
+# leaves the CLI, which is what CI and scripts use.
+default = ["tui"]
+tui = ["dep:ratatui", "dep:ratatui-themes"]
 
 [dev-dependencies]
 tempfile = "3"

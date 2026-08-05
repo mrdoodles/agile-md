@@ -90,7 +90,7 @@ assert "empty columns say so" bash -c "'${AMD}' ls doing | grep -q '(empty)'"
 
 echo "ticket types:"
 assert "tickets record their type" grep -q '^ticket: "development"$' tasks/todo/001-first-task.md
-"${AMD}" new "Renew the certificates" --ticket admin >/dev/null
+"${AMD}" new "Renew the certificates" --type admin >/dev/null
 assert "admin tickets record their type" grep -q '^ticket: "admin"$' tasks/todo/006-renew-the-certificates.md
 assert "admin tickets carry no branch" \
   bash -c "! grep -q '^branch:' tasks/todo/006-renew-the-certificates.md"
@@ -98,6 +98,8 @@ assert "admin tickets carry no change type" \
   bash -c "! grep -q '^type:' tasks/todo/006-renew-the-certificates.md"
 assert "development tickets carry both" \
   bash -c "grep -q '^type: \"feat\"$' tasks/todo/001-first-task.md && grep -q '^branch: \"feature/first-task\"$' tasks/todo/001-first-task.md"
+assert "the type list leads with admin" \
+  bash -c "'${AMD}' new 'Nope' --type development 2>&1 | grep -q 'admin, feat, fix'"
 assert "templates lists both ticket types" \
   bash -c "'${AMD}' templates | grep -q '^development' && '${AMD}' templates | grep -q '^admin'"
 assert "the board flags a non-development ticket" \
@@ -216,6 +218,12 @@ assert "amd link --one-way leaves the other end alone" \
   bash -c "'${AMD}' link 2 one-way --one-way >/dev/null && ! grep -q '002' tasks/todo/*-one-way-only.md"
 assert "admin tickets carry the list too" \
   bash -c "grep -q '^related: \[\]$' tasks/*/006-renew-the-certificates.md"
+
+echo "pipes:"
+assert "the board survives a closed pipe" \
+  bash -c "'${AMD}' board --plain | head -2 >/dev/null 2>/tmp/amd-pipe.err; ! grep -q 'panicked' /tmp/amd-pipe.err"
+assert "showing a task survives a closed pipe" \
+  bash -c "'${AMD}' show 1 | head -1 >/dev/null 2>/tmp/amd-pipe.err; ! grep -q 'panicked' /tmp/amd-pipe.err"
 
 echo "completions:"
 assert "bash completions are valid bash" \

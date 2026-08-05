@@ -38,6 +38,45 @@ const PREFIXES: [(&str, &str); 3] = [("feat", "feature"), ("fix", "bugfix"), ("r
 /// Fallback branch prefix for types with no specific mapping.
 const DEFAULT_PREFIX: &str = "chore";
 
+/// The one type an admin ticket carries. It isn't a conventional-commit type —
+/// it's the answer to "this isn't code", which is why it lives alongside them
+/// in a single list rather than in a second field.
+pub const ADMIN: &str = "admin";
+
+/// Everything a ticket's `type` may be: `admin` plus the change types. One
+/// question instead of two — the ticket type and the change it makes were
+/// always the same decision.
+pub fn ticket_types() -> Vec<String> {
+    let mut all = vec![ADMIN.to_string()];
+    all.extend(types());
+    all
+}
+
+/// Split a chosen type into the template that renders it and the change type
+/// that names its branch. `admin` has no change type and so gets no branch.
+pub fn resolve(chosen: &str) -> (String, String) {
+    if chosen == ADMIN {
+        (ADMIN.to_string(), String::new())
+    } else {
+        (
+            crate::templates::DEFAULT_TEMPLATE.to_string(),
+            chosen.to_string(),
+        )
+    }
+}
+
+/// Check a chosen type against the accepted list.
+pub fn validate_ticket_type(chosen: &str) -> Result<()> {
+    let types = ticket_types();
+    if types.iter().any(|known| known == chosen) {
+        return Ok(());
+    }
+    bail!(
+        "unknown type '{chosen}' (expected one of: {}; set AMD_TYPES to change the list)",
+        types.join(", ")
+    )
+}
+
 /// The type labels this board accepts.
 pub fn types() -> Vec<String> {
     match env::var("AMD_TYPES") {

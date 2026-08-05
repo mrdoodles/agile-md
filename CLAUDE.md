@@ -15,7 +15,18 @@ MiniJinja templates**.
 
 ## Layout
 
-- `src/main.rs` — clap CLI and command handlers.
+The crate is a **library plus a binary**, so the CLI and the terminal UI share
+one implementation of the board.
+
+- `src/lib.rs` — the library: `board`, `branch`, `create`, `git`, `render`,
+  `task`, `templates` (and `tui` behind the default feature).
+- `src/create.rs` — making a ticket, split into `Draft::prepare` (resolve and
+  render, touching nothing) and `Draft::write` (file, child link, backlinks).
+  That gap is what lets the CLI put the rendered ticket in `$EDITOR` before
+  anything is written, while the TUI writes what it already has.
+- `src/tui/` — the terminal UI (feature `tui`, on by default) and its settings.
+- `src/main.rs` — clap CLI and command handlers; the binary also owns
+  `form.rs`, `value.rs` and `completions.rs`, which are CLI-only.
 - `src/board.rs` — board discovery (`<repo-root>/${AMD_DIR:-tasks}`), the
   `Column` enum, task lookup, moves, `ensure`/`create`.
 - `src/task.rs` — `Task` (path, column, id, stem), frontmatter `meta` lookup,
@@ -68,9 +79,10 @@ MiniJinja templates**.
 
 ## Ticket types, labels and branches (`src/branch.rs`)
 
-- **Two ticket types, and each is a template**: `development` (default) and
-  `admin`. Development work is tracked on a branch; admin work — a rota, a
-  renewal, an approval — has nothing to check out.
+- **One `type` field**: `admin`, or a conventional-commit type. `ticket_types()`
+  is that list and `resolve()` splits the answer into a template and a change
+  type — `admin` maps to the admin template with no change type, everything else
+  to the development template. One question in every front end, not two.
 - **The template decides whether there's a branch.** `Templates::branches()`
   asks whether the template source references `branch`; the development one
   does, the admin one doesn't. `Templates::uses()` generalises it: a template
@@ -173,6 +185,33 @@ MiniJinja templates**.
   renaming one breaks every user template — treat it as a public API.
 - Template errors are flattened by `render_error()` (message + line + cause
   chain + MiniJinja debug info); without that only the top line survives.
+
+## The terminal UI (`src/tui/`)
+
+The only front end, and a **default feature** — a build that cannot show you the
+board is not much use. `--no-default-features` leaves the CLI for CI and
+scripts. Windowed front ends were tried and dropped: a terminal UI costs 2 MB
+resident and no idle CPU, works over SSH, and needs no windowing stack. Don't
+reintroduce one without a reason that outweighs that.
+
+- It owns no board logic: `Draft` creates, `Board::move_task` moves,
+  `render::column_forest`/`flatten` nests. Editing hands over to `$EDITOR`
+  around `leave()`/`enter()` rather than reimplementing an editor in a list.
+- **Mouse capture** is enabled after `ratatui::init()` and *disabled before*
+  `ratatui::restore()` — the other order leaves the shell receiving escape
+  sequences. The same pair wraps the `$EDITOR` handoff.
+- Clicks resolve against the areas recorded during the last `draw()`
+  (`column_areas`, `settings_area`, `dialog_area`), which is why `draw` takes
+  `&mut self`. `row_in()` accounts for the widget border.
+- **Themes** come from `ratatui-themes`; every colour is a palette lookup, so
+  none are hard-coded. The settings dialog previews as you move and restores the
+  old theme on `esc`. `settings.rs` persists one line to
+  `$XDG_CONFIG_HOME/agile-md/config`, treating anything unreadable as defaults.
+  Its `load_from`/`save_to` take a path so the tests need no environment
+  mutation — two tests racing on `XDG_CONFIG_HOME` is how that started.
+- Testing works through a pty: `script -q /dev/null bash -c "stty rows 40 cols
+  130; amd tui"` with timed keystrokes, including SGR mouse sequences. Without
+  the `stty` the pty has no size and ratatui draws into a zero-height screen.
 
 ## Completions
 
