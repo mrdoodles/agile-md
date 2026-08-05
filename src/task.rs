@@ -259,18 +259,35 @@ fn unquote(value: &str) -> &str {
 
 /// `"Publish to Marketplace"` -> `"publish-to-marketplace"`.
 ///
-/// ASCII-only on purpose: the id and slug are a filename, and filenames that
-/// survive every filesystem, shell and URL are worth more than transliteration.
+/// The result is ASCII, because the slug is a filename and a branch name and
+/// those are worth keeping boring. Letters and digits from any script are
+/// **transliterated** rather than dropped, so `Ünïcödé` becomes `unicode` and
+/// `北京` becomes `bei-jing` instead of collapsing to noise.
+///
+/// Symbols are not transliterated: an emoji in a title is decoration, and
+/// `party 🎉` should be `party`, not `party-tada`.
 pub fn slugify(title: &str) -> String {
     let mut slug = String::with_capacity(title.len());
     let mut pending_dash = false;
+    let push = |ch: char, slug: &mut String, pending_dash: &mut bool| {
+        if *pending_dash && !slug.is_empty() {
+            slug.push('-');
+        }
+        slug.push(ch.to_ascii_lowercase());
+        *pending_dash = false;
+    };
     for ch in title.chars() {
         if ch.is_ascii_alphanumeric() {
-            if pending_dash && !slug.is_empty() {
-                slug.push('-');
+            push(ch, &mut slug, &mut pending_dash);
+        } else if ch.is_alphanumeric() {
+            // A letter or digit from another script: use its closest ASCII.
+            for ch in deunicode::deunicode_char(ch).unwrap_or_default().chars() {
+                if ch.is_ascii_alphanumeric() {
+                    push(ch, &mut slug, &mut pending_dash);
+                } else {
+                    pending_dash = true;
+                }
             }
-            slug.push(ch.to_ascii_lowercase());
-            pending_dash = false;
         } else {
             pending_dash = true;
         }
@@ -304,10 +321,30 @@ mod tests {
     }
 
     #[test]
+    fn slugify_transliterates_rather_than_dropping() {
+        assert_eq!(
+            slugify(r#"Ünïcödé "quoted" ticket"#),
+            "unicode-quoted-ticket"
+        );
+        assert_eq!(slugify("Größe ändern"), "grosse-andern");
+        assert_eq!(slugify("Añadir sesión"), "anadir-sesion");
+        assert_eq!(slugify("Москва"), "moskva");
+        assert_eq!(slugify("北京"), "bei-jing");
+    }
+
+    #[test]
+    fn slugify_treats_symbols_as_separators_not_words() {
+        // deunicode would call this one "tada"; a branch name shouldn't say so.
+        assert_eq!(slugify("party 🎉 time"), "party-time");
+        assert_eq!(slugify("100% done"), "100-done");
+    }
+
+    #[test]
     fn slugify_is_empty_when_nothing_survives() {
         // The caller rejects these — an empty slug can't make a branch name.
         assert_eq!(slugify("***"), "");
         assert_eq!(slugify(""), "");
+        assert_eq!(slugify("🎉🎉"), "");
     }
 
     #[test]

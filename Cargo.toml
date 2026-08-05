@@ -33,6 +33,7 @@ clap_complete = "4"
 ratatui = { version = "0.30", optional = true }
 ratatui-themes = { version = "0.3", optional = true }
 libc = "0.2.189"
+deunicode = "1.6.2"
 
 [features]
 # The terminal front end is on by default: it's the only one, and a build

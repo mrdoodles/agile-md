@@ -30,7 +30,9 @@ one implementation of the board.
 - `src/board.rs` — board discovery (`<repo-root>/${AMD_DIR:-tasks}`), the
   `Column` enum, task lookup, moves, `ensure`/`create`.
 - `src/task.rs` — `Task` (path, column, id, stem), frontmatter `meta` lookup,
-  `slugify`.
+  `slugify` (transliterates via `deunicode`, so a title in any script still
+  makes a plain-ASCII filename and branch; symbols stay separators so an emoji
+  doesn't become a word).
 - `src/templates.rs` — the MiniJinja `Environment`, built-in templates, board
   overrides, `TaskContext`, `required_extras`.
 - `src/form.rs` — every interactive prompt, built on `inquire` (text, select,
