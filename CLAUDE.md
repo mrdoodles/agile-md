@@ -101,14 +101,17 @@ one implementation of the board.
   `release`, `chore`), matching mrdoodles/conventional-validator's branch check
   directly — there's no longer a commit-type-to-branch-prefix mapping to keep in
   step. `AMD_BRANCH_TYPES` overrides the list.
-- `owner` (not `assignee`) says who's doing it, empty by default: tickets are
-  created now and assigned later.
+- `assignee` says who's doing it, empty by default: tickets are created now and
+  assigned later. There is deliberately **no second person field** — who created
+  a ticket is already in `git log --follow`, so a `reporter` would duplicate
+  history the tool is built on. It was briefly called `owner`; `Task::assignee`
+  still reads that key.
 - **Frontmatter keys are hyphenated, template variables are not** —
   `branch-type: {{ branch_type | yaml }}`. Jinja would read `branch-type` as a
   subtraction, so the variable has to be `branch_type`; the key is just text.
 - `Task` reads the new keys and **falls back to the old ones** (`type`,
-  `branch`, `assignee`), so boards written before this change still list, start
-  and filter correctly. There's no migration command; a ticket picks up the new
+  `branch`, `owner`), so boards written before this change still list, start and
+  filter correctly. There's no migration command; a ticket picks up the new
   shape when it's rewritten.
 - Titles are validated against git's ref rules at creation — the title becomes
   the branch, so a title with nothing sluggable in it is rejected up front.
@@ -144,7 +147,7 @@ one implementation of the board.
   Non-interactively a missing value is an error with the usage line — the same
   contract the bash version had, and why the tool never hangs in CI.
 - Optional arguments drive it: `amd new` with no title runs the full form
-  (title, branch type, owner, parent, related, tags), `-i` re-asks for what was
+  (title, branch type, assignee, parent, related, tags), `-i` re-asks for what was
   passed, and
   `start`/`done`/`back`/`show`/`edit` with no `<ref>` open a task picker
   scoped to the columns that command can act on.

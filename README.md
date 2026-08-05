@@ -40,7 +40,7 @@ In any git repository:
 
 ```bash
 amd init                          # scaffold tasks/{todo,doing,done} here
-amd new "Publish to Marketplace" --branch-type feature --owner @me
+amd new "Publish to Marketplace" --branch-type feature --assignee @me
 amd board                         # show all columns (the default)
 amd start 1                       # todo -> doing, and switch to feature/publish-to-marketplace
 amd done  1                       # doing -> done
@@ -63,7 +63,7 @@ rest:
 | ------------- | --- | --- |
 | `id`          | automatic | `007`, from the board's counter |
 | `title`       | required | names the file, and the branch |
-| `owner`       | optional | who's doing it; assignable later |
+| `assignee`    | optional | who's doing it; assignable later |
 | `branch-type` | optional | `feature`, `bugfix`, `hotfix`, `release`, `chore` |
 | `branch-name` | automatic | `<branch-type>/<title>`, empty without a branch type |
 | `parent`      | optional | the ticket this sits under, any depth |
@@ -77,7 +77,7 @@ renewal — it just has nothing to check out:
 
 ```bash
 amd new "Renew the certificates"                    # no branch
-amd new "Crash on save" --branch-type bugfix -o alex
+amd new "Crash on save" --branch-type bugfix -a alex
 amd start 1     # moves it; "no branch type on this ticket"
 amd start 2     # moves it and switches to bugfix/crash-on-save
 ```
@@ -92,17 +92,18 @@ edit it — before any work starts. Because the title becomes a branch, it's
 **validated when you type it**: a title with nothing sluggable in it is rejected
 rather than producing a ticket that can never start.
 
-## Owners
+## Assignees
 
 ```bash
-amd new "Add login" --owner alex   # or -o @me for whoever git says you are
-amd assign 3 sam                   # give an existing ticket an owner
-amd assign 3                       # take it off them
+amd new "Add login" --assignee alex   # or -a @me for whoever git says you are
+amd assign 3 sam                      # assign an existing ticket
+amd assign 3                          # unassign it
 ```
 
-Tickets are meant to be created now and given an owner later, so `owner` starts
+Tickets are meant to be created now and assigned later, so `assignee` starts
 empty. It shows on the board as `@sam`, and in the TUI `a` narrows the board to
-one person.
+one person. Who *created* a ticket isn't a field — `git log --follow` on the
+file already knows.
 
 ## Related tickets
 

@@ -63,7 +63,7 @@ assert "tags in frontmatter" grep -q '^tags: \[x,y\]$' tasks/todo/002-second-tas
 assert "a new ticket has no branch type by default" \
   grep -q '^branch-type: ""$' tasks/todo/001-first-task.md
 assert "and so has no branch name" grep -q '^branch-name: ""$' tasks/todo/001-first-task.md
-assert "a new ticket has no owner" grep -q '^owner: ""$' tasks/todo/001-first-task.md
+assert "a new ticket is unassigned" grep -q '^assignee: ""$' tasks/todo/001-first-task.md
 assert "created date is filled in" grep -qE '^created: "[0-9]{4}-[0-9]{2}-[0-9]{2}"$' tasks/todo/001-first-task.md
 
 echo "parents and the tree:"
@@ -157,17 +157,17 @@ assert "eject writes an editable copy into the board" \
   bash -c "'${AMD}' templates eject ticket >/dev/null && test -f tasks/templates/ticket.md.jinja"
 assert "eject refuses to clobber without --force" \
   bash -c "! '${AMD}' templates eject ticket"
-printf -- '---\nid: {{ id | yaml }}\ntitle: {{ title | yaml }}\ntype: {{ branch_type | yaml }}\nowner: {{ extra.owner | yaml }}\n---\n\n## Custom\n' \
+printf -- '---\nid: {{ id | yaml }}\ntitle: {{ title | yaml }}\ntype: {{ branch_type | yaml }}\nassignee: {{ extra.owner | yaml }}\n---\n\n## Custom\n' \
   > tasks/templates/ticket.md.jinja
 assert "board template overrides the built-in" \
   bash -c "'${AMD}' new 'Overridden' -s owner=tim >/dev/null && grep -q '^## Custom$' tasks/todo/*-overridden.md"
 assert "--set values reach the template" \
-  bash -c "grep -q '^owner: \"tim\"$' tasks/todo/*-overridden.md"
+  bash -c "grep -q '^assignee: \"tim\"$' tasks/todo/*-overridden.md"
 assert "labels reach a custom template" \
   bash -c "grep -q '^type: \"\"$' tasks/todo/*-overridden.md"
 assert "templates list shows the board override" \
   bash -c "'${AMD}' templates | grep -q 'templates/ticket.md.jinja'"
-printf -- '---\nid: {{ id | yaml }}\nowner: {{ extra.owner | yaml }}\ndue: {{ extra["due date"] | yaml }}\n---\n' \
+printf -- '---\nid: {{ id | yaml }}\nassignee: {{ extra.owner | yaml }}\ndue: {{ extra["due date"] | yaml }}\n---\n' \
   > tasks/templates/ticket.md.jinja
 assert "a template field with no value is an error, naming the flag" \
   bash -c "'${AMD}' new 'Needs fields' 2>&1 | grep -q -- '--set owner='"
@@ -214,19 +214,19 @@ assert "the counter records the next id" \
 assert "a deleted ticket does not hand its id back" \
   bash -c "'${AMD}' new 'Doomed' >/dev/null; id=\$(ls tasks/todo | grep doomed | cut -d- -f1); rm tasks/todo/\${id}-doomed.md; '${AMD}' new 'After the delete' >/dev/null; ! test -f tasks/todo/\${id}-after-the-delete.md"
 
-echo "owners:"
-assert "a new ticket has nobody on it" \
-  bash -c "grep -q '^owner: \"\"$' tasks/*/001-first-task.md"
-"${AMD}" new "Owned at creation" -o alex >/dev/null
-assert "--owner sets it at creation" \
-  bash -c "grep -q '^owner: \"alex\"$' tasks/todo/*-owned-at-creation.md"
+echo "assignees:"
+assert "a new ticket is unassigned" \
+  bash -c "grep -q '^assignee: \"\"$' tasks/*/001-first-task.md"
+"${AMD}" new "Assigned at creation" -a alex >/dev/null
+assert "--assignee sets it at creation" \
+  bash -c "grep -q '^assignee: \"alex\"$' tasks/todo/*-assigned-at-creation.md"
 assert "amd assign sets it afterwards" \
-  bash -c "'${AMD}' assign 1 sam >/dev/null && grep -q '^owner: \"sam\"$' tasks/*/001-first-task.md"
+  bash -c "'${AMD}' assign 1 sam >/dev/null && grep -q '^assignee: \"sam\"$' tasks/*/001-first-task.md"
 assert "amd assign with no name clears it" \
-  bash -c "'${AMD}' assign 1 >/dev/null && grep -q '^owner: \"\"$' tasks/*/001-first-task.md"
+  bash -c "'${AMD}' assign 1 >/dev/null && grep -q '^assignee: \"\"$' tasks/*/001-first-task.md"
 assert "@me resolves to the git user" \
-  bash -c "'${AMD}' assign 1 @me >/dev/null && grep -q '^owner: \"t\"$' tasks/*/001-first-task.md"
-assert "the board shows the owner" bash -c "'${AMD}' board --plain | grep -q '@t'"
+  bash -c "'${AMD}' assign 1 @me >/dev/null && grep -q '^assignee: \"t\"$' tasks/*/001-first-task.md"
+assert "the board shows the assignee" bash -c "'${AMD}' board --plain | grep -q '@t'"
 
 echo "repositories:"
 assert "working in a repository remembers it" \
@@ -267,7 +267,7 @@ assert "a task cannot be related to itself" \
 assert "amd link --one-way leaves the other end alone" \
   bash -c "'${AMD}' link 2 one-way --one-way >/dev/null && ! grep -q '002' tasks/todo/*-one-way-only.md"
 assert "a ticket with no branch carries the list too" \
-  bash -c "grep -q '^related: \[\]$' tasks/*/*-owned-at-creation.md"
+  bash -c "grep -q '^related: \[\]$' tasks/*/*-assigned-at-creation.md"
 
 echo "pipes:"
 assert "the board survives a closed pipe" \

@@ -32,8 +32,8 @@ pub struct NewTicket {
     pub template: String,
     /// Branch type (`feature`, `bugfix`, …); empty for a ticket with no branch.
     pub branch_type: String,
-    /// Who owns it; empty for nobody, and assignable later.
-    pub owner: String,
+    /// Who it's assigned to; empty for nobody, and assignable later.
+    pub assignee: String,
     /// A ref (id or slug) for the ticket this one sits under.
     pub parent: Option<String>,
     /// Refs for the tickets this one relates to.
@@ -136,7 +136,7 @@ impl Draft {
                 .as_ref()
                 .map(|task| task.stem.clone())
                 .unwrap_or_default(),
-            owner: ticket.owner,
+            assignee: ticket.assignee,
             related: related.clone(),
             tags: ticket.tags,
             created,

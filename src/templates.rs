@@ -72,9 +72,9 @@ pub struct TaskContext {
     /// The branch this ticket is worked on, made from the branch type and the
     /// title. Empty when there's no branch type.
     pub branch_name: String,
-    /// Who owns the ticket, or an empty string — tickets can be created now
-    /// and given an owner later.
-    pub owner: String,
+    /// Who the ticket is assigned to, or an empty string — tickets can be
+    /// created now and assigned later.
+    pub assignee: String,
     /// Id of this ticket's parent, or an empty string. One field instead of
     /// epic/story: nesting gives you those, and any depth beyond them.
     pub parent: String,
@@ -385,7 +385,7 @@ mod tests {
             slug: "first-task".to_string(),
             branch_type: "bugfix".to_string(),
             branch_name: "bugfix/first-task".to_string(),
-            owner: "tim".to_string(),
+            assignee: "tim".to_string(),
             parent: "002".to_string(),
             parent_link: "002-checkout".to_string(),
             related: vec!["003".to_string()],
@@ -418,7 +418,7 @@ mod tests {
             rendered.contains("\nbranch-name: \"bugfix/first-task\"\n"),
             "{rendered}"
         );
-        assert!(rendered.contains("\nowner: \"tim\"\n"), "{rendered}");
+        assert!(rendered.contains("\nassignee: \"tim\"\n"), "{rendered}");
         assert!(rendered.contains("\nparent: \"002\"\n"), "{rendered}");
         assert!(rendered.contains("[[002-checkout]]"), "{rendered}");
         assert!(rendered.contains("\ntags: [x,y]\n"), "{rendered}");

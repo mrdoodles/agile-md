@@ -38,10 +38,10 @@ use crate::{branch, render};
 
 use settings::Settings;
 
-const HELP: &str = "j/k move  h/l column  [ ] shift  enter view  e edit  n new  p repo  a owner  s settings  q quit";
+const HELP: &str = "j/k move  h/l column  [ ] shift  enter view  e edit  n new  p repo  a assignee  s settings  q quit";
 const SETTINGS_BUTTON: &str = " settings ";
 /// The filter entry standing for "nobody has this one".
-const UNOWNED: &str = "(nobody)";
+const UNASSIGNED: &str = "(unassigned)";
 /// The filter entry standing for "all of them".
 const EVERYTHING: &str = "(all)";
 
@@ -85,7 +85,7 @@ enum Mode {
         selected: usize,
     },
     /// Pick whose tickets to look at, or everyone's.
-    Owners {
+    Assignees {
         selected: usize,
     },
 }
@@ -97,7 +97,7 @@ struct NewForm {
     title: String,
     /// Index into `branch::choices()`, which starts at "(none)".
     branch_type: usize,
-    owner: String,
+    assignee: String,
     parent: String,
     related: String,
     tags: String,
@@ -106,14 +106,21 @@ struct NewForm {
 }
 
 /// The rows, in order. The branch type is a dropdown; the rest are text.
-const FIELDS: [&str; 6] = ["Title", "Branch type", "Owner", "Parent", "Related", "Tags"];
+const FIELDS: [&str; 6] = [
+    "Title",
+    "Branch type",
+    "Assignee",
+    "Parent",
+    "Related",
+    "Tags",
+];
 const BRANCH_TYPE_ROW: usize = 1;
 
 impl NewForm {
     fn field_mut(&mut self, row: usize) -> Option<&mut String> {
         match row {
             0 => Some(&mut self.title),
-            2 => Some(&mut self.owner),
+            2 => Some(&mut self.assignee),
             3 => Some(&mut self.parent),
             4 => Some(&mut self.related),
             5 => Some(&mut self.tags),
@@ -128,7 +135,7 @@ impl NewForm {
                 .get(self.branch_type)
                 .cloned()
                 .unwrap_or_default(),
-            2 => self.owner.clone(),
+            2 => self.assignee.clone(),
             3 => self.parent.clone(),
             4 => self.related.clone(),
             5 => self.tags.clone(),
@@ -171,9 +178,9 @@ struct App {
     /// Which repository is on show, or `None` for all of them.
     repo: Option<usize>,
     /// Whose tickets are on show, or `None` for everyone's.
-    owner_filter: Option<String>,
+    assignee_filter: Option<String>,
     /// Everyone with a ticket anywhere in view, for the picker.
-    owners: Vec<String>,
+    assignees: Vec<String>,
     /// Flattened columns of cards.
     columns: Vec<Vec<Card>>,
     /// Selection per column, so switching columns keeps your place.
@@ -200,8 +207,8 @@ impl App {
             settings: Settings::load(),
             repos,
             repo: None,
-            owner_filter: None,
-            owners: Vec::new(),
+            assignee_filter: None,
+            assignees: Vec::new(),
             columns: Vec::new(),
             selected: vec![0; Column::ALL.len()],
             column: 0,
@@ -230,7 +237,7 @@ impl App {
             None => (0..self.repos.len()).collect(),
         };
 
-        let mut owners: Vec<String> = Vec::new();
+        let mut assignees: Vec<String> = Vec::new();
         let mut columns: Vec<Vec<Card>> = Vec::new();
         for column in Column::ALL {
             let mut cards = Vec::new();
@@ -241,10 +248,10 @@ impl App {
                 let board = entry.board();
                 let nodes = render::column_forest(&board, column)?;
                 for (task, depth) in render::flatten(&nodes) {
-                    if let Some(who) = task.owner()
-                        && !owners.contains(&who)
+                    if let Some(who) = task.assignee()
+                        && !assignees.contains(&who)
                     {
-                        owners.push(who);
+                        assignees.push(who);
                     }
                     if !self.wanted(&task) {
                         continue;
@@ -258,8 +265,8 @@ impl App {
             }
             columns.push(cards);
         }
-        owners.sort();
-        self.owners = owners;
+        assignees.sort();
+        self.assignees = assignees;
         self.columns = columns;
         for (index, cards) in self.columns.iter().enumerate() {
             self.selected[index] = self.selected[index].min(cards.len().saturating_sub(1));
@@ -269,10 +276,10 @@ impl App {
 
     /// Does this ticket pass the assignee filter?
     fn wanted(&self, task: &Task) -> bool {
-        match &self.owner_filter {
+        match &self.assignee_filter {
             None => true,
-            Some(who) if who == UNOWNED => task.owner().is_none(),
-            Some(who) => task.owner().as_deref() == Some(who.as_str()),
+            Some(who) if who == UNASSIGNED => task.assignee().is_none(),
+            Some(who) => task.assignee().as_deref() == Some(who.as_str()),
         }
     }
 
@@ -374,17 +381,17 @@ impl App {
                 }
                 _ => {}
             },
-            Mode::Owners { selected } => match key.code {
+            Mode::Assignees { selected } => match key.code {
                 KeyCode::Esc => self.mode = Mode::Board,
                 KeyCode::Enter => {
                     let chosen = *selected;
-                    self.choose_owner(chosen);
+                    self.choose_assignee(chosen);
                 }
                 KeyCode::Char('j') | KeyCode::Down => {
-                    *selected = (*selected + 1) % (self.owners.len() + 2);
+                    *selected = (*selected + 1) % (self.assignees.len() + 2);
                 }
                 KeyCode::Char('k') | KeyCode::Up => {
-                    let count = self.owners.len() + 2;
+                    let count = self.assignees.len() + 2;
                     *selected = (*selected + count - 1) % count;
                 }
                 _ => {}
@@ -410,7 +417,7 @@ impl App {
                 }),
                 KeyCode::Char('n') => self.open_new(),
                 KeyCode::Char('p') => self.open_repos(),
-                KeyCode::Char('a') => self.open_owners(),
+                KeyCode::Char('a') => self.open_assignees(),
                 KeyCode::Char('s') => self.open_settings(),
                 KeyCode::Char('e') => self.edit(terminal)?,
                 KeyCode::Enter => self.open_detail(),
@@ -432,8 +439,8 @@ impl App {
                     self.preview();
                 }
                 Mode::Repos { selected } => *selected = (*selected + 1) % (self.repos.len() + 1),
-                Mode::Owners { selected } => {
-                    *selected = (*selected + 1) % (self.owners.len() + 2);
+                Mode::Assignees { selected } => {
+                    *selected = (*selected + 1) % (self.assignees.len() + 2);
                 }
                 _ => self.move_selection(1),
             },
@@ -448,8 +455,8 @@ impl App {
                     let count = self.repos.len() + 1;
                     *selected = (*selected + count - 1) % count;
                 }
-                Mode::Owners { selected } => {
-                    let count = self.owners.len() + 2;
+                Mode::Assignees { selected } => {
+                    let count = self.assignees.len() + 2;
                     *selected = (*selected + count - 1) % count;
                 }
                 _ => self.move_selection(-1),
@@ -491,11 +498,11 @@ impl App {
                     self.choose_repo(row);
                 }
             }
-            Mode::Owners { .. } => {
+            Mode::Assignees { .. } => {
                 if let Some(row) = row_in(self.dialog_area, at)
-                    && row < self.owners.len() + 2
+                    && row < self.assignees.len() + 2
                 {
-                    self.choose_owner(row);
+                    self.choose_assignee(row);
                 }
             }
             Mode::Detail { .. } => {}
@@ -555,29 +562,29 @@ impl App {
         });
     }
 
-    /// The owner picker: everyone, then unowned, then each name in view.
-    fn open_owners(&mut self) {
-        let selected = match &self.owner_filter {
+    /// The assignee picker: everyone, then unassigned, then each name in view.
+    fn open_assignees(&mut self) {
+        let selected = match &self.assignee_filter {
             None => 0,
-            Some(who) if who == UNOWNED => 1,
+            Some(who) if who == UNASSIGNED => 1,
             Some(who) => self
-                .owners
+                .assignees
                 .iter()
                 .position(|name| name == who)
                 .map(|index| index + 2)
                 .unwrap_or(0),
         };
-        self.mode = Mode::Owners { selected };
+        self.mode = Mode::Assignees { selected };
     }
 
-    fn choose_owner(&mut self, row: usize) {
-        self.owner_filter = match row {
+    fn choose_assignee(&mut self, row: usize) {
+        self.assignee_filter = match row {
             0 => None,
-            1 => Some(UNOWNED.to_string()),
-            other => self.owners.get(other - 2).cloned(),
+            1 => Some(UNASSIGNED.to_string()),
+            other => self.assignees.get(other - 2).cloned(),
         };
         let label = self
-            .owner_filter
+            .assignee_filter
             .clone()
             .unwrap_or_else(|| "everyone".to_string());
         self.mode = Mode::Board;
@@ -688,7 +695,7 @@ impl App {
             title: form.title.trim().to_string(),
             template: templates::DEFAULT_TEMPLATE.to_string(),
             branch_type: branch::normalise(&form.value(BRANCH_TYPE_ROW)),
-            owner: form.owner.trim().to_string(),
+            assignee: form.assignee.trim().to_string(),
             parent: Some(form.parent.trim().to_string()).filter(|it| !it.is_empty()),
             related: split(&form.related),
             tags: split(&form.tags),
@@ -752,11 +759,11 @@ impl App {
                     &palette,
                 );
             }
-            Mode::Owners { selected } => {
+            Mode::Assignees { selected } => {
                 let selected = *selected;
-                let mut choices = vec![EVERYTHING.to_string(), UNOWNED.to_string()];
-                choices.extend(self.owners.clone());
-                self.draw_picker(frame, " Owner ", selected, choices, &palette);
+                let mut choices = vec![EVERYTHING.to_string(), UNASSIGNED.to_string()];
+                choices.extend(self.assignees.clone());
+                self.draw_picker(frame, " Assignee ", selected, choices, &palette);
             }
             Mode::Board => self.dialog_area = Rect::ZERO,
         }
@@ -774,7 +781,7 @@ impl App {
         } else if self.repos.len() > 1 {
             filters.push(format!("{} repos", self.repos.len()));
         }
-        if let Some(who) = &self.owner_filter {
+        if let Some(who) = &self.assignee_filter {
             filters.push(format!("@{who}"));
         }
         let filters = match filters.is_empty() {
@@ -840,7 +847,7 @@ impl App {
                             Style::new().fg(palette.secondary),
                         ));
                     }
-                    if let Some(who) = task.owner() {
+                    if let Some(who) = task.assignee() {
                         spans.push(Span::styled(
                             format!("  @{who}"),
                             Style::new().fg(palette.accent),
@@ -1108,7 +1115,14 @@ mod tests {
     fn the_form_carries_every_ticket_field() {
         assert_eq!(
             FIELDS,
-            ["Title", "Branch type", "Owner", "Parent", "Related", "Tags"]
+            [
+                "Title",
+                "Branch type",
+                "Assignee",
+                "Parent",
+                "Related",
+                "Tags"
+            ]
         );
     }
 
@@ -1136,7 +1150,7 @@ mod tests {
         form.focus = 2;
         form.field_mut(form.focus).unwrap().push_str("tim");
         assert_eq!(form.title, "Title here");
-        assert_eq!(form.owner, "tim");
+        assert_eq!(form.assignee, "tim");
         // The dropdown row has no text to type into.
         assert!(form.field_mut(BRANCH_TYPE_ROW).is_none());
     }

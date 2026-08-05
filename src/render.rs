@@ -260,7 +260,7 @@ fn labels(node: &Node, root: bool) -> String {
     let task = &node.task;
     [
         task.branch_type(),
-        task.owner().map(|owner| format!("@{owner}")),
+        task.assignee().map(|who| format!("@{who}")),
         // In the same column the tree already shows the parent; this marker is
         // for a child whose parent sits in another column.
         node.parent

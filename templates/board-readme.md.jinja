@@ -11,7 +11,7 @@ There is one kind of ticket, with fields you fill in as they apply. A
 ({% for kind in types %}`{{ kind }}`{% if not loop.last %}, {% endif %}{% endfor %})
 gives it a branch — `amd start` switches to `<branch-type>/<title>` — and a
 ticket without one simply has nothing to check out. `parent` nests tickets and
-`owner` says who's doing it.
+`assignee` says who's doing it.
 
 Tasks are rendered from a Jinja template. Run `amd templates` to see what's
 available, and `amd templates eject ticket` to drop an editable copy into

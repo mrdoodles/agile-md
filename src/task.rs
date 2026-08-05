@@ -68,20 +68,20 @@ impl Task {
             .unwrap_or_else(|| self.stem.clone())
     }
 
-    /// Who owns the ticket, if anyone. Falls back to the old `assignee` key so
-    /// tickets written before the rename still read.
-    pub fn owner(&self) -> Option<String> {
-        self.meta("owner")
-            .or_else(|| self.meta("assignee"))
+    /// Who the ticket is assigned to, if anyone. Also reads `owner`, which the
+    /// field was briefly called, so no board is left stranded.
+    pub fn assignee(&self) -> Option<String> {
+        self.meta("assignee")
+            .or_else(|| self.meta("owner"))
             .filter(|who| !who.is_empty())
     }
 
-    /// Give the ticket an owner, or clear it with an empty name.
+    /// Assign the ticket, or clear it with an empty name.
     pub fn assign(&self, who: &str) -> Result<()> {
         let text = fs::read_to_string(&self.path)
             .with_context(|| format!("reading {}", self.path.display()))?;
         let quoted = format!("{:?}", who);
-        let updated = set_meta(&text, "owner", &quoted)
+        let updated = set_meta(&text, "assignee", &quoted)
             .with_context(|| format!("updating {}", self.path.display()))?;
         fs::write(&self.path, updated).with_context(|| format!("writing {}", self.path.display()))
     }

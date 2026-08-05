@@ -129,7 +129,7 @@ enum Cmd {
         #[arg(value_name = "REF")]
         task: Option<String>,
     },
-    /// Give a ticket an owner, or clear it with no name
+    /// Assign a ticket, or clear it with no name
     Assign {
         #[arg(value_name = "REF")]
         task: String,
@@ -184,10 +184,10 @@ struct NewArgs {
     /// The ticket this one sits under (an epic, a story, anything)
     #[arg(short = 'p', long, value_name = "REF")]
     parent: Option<String>,
-    /// Who owns it (nobody by default; `@me` is you). Tickets can be created
-    /// now and given an owner later
-    #[arg(short = 'o', long, alias = "assignee", value_name = "WHO")]
-    owner: Option<String>,
+    /// Who it's assigned to (nobody by default; `@me` is you). Tickets can be
+    /// created now and assigned later
+    #[arg(short = 'a', long, alias = "owner", value_name = "WHO")]
+    assignee: Option<String>,
     /// Another ticket this one depends on or relates to (repeatable)
     #[arg(short = 'r', long = "related", value_name = "REF")]
     related: Vec<String>,
@@ -348,7 +348,7 @@ fn run() -> Result<()> {
         Cmd::Tui => cmd_tui(board),
         Cmd::Assign { task, who } => {
             let task = resolve(&board, Some(task), "assign", &Column::ALL)?;
-            let who = resolve_owner(who.as_deref());
+            let who = resolve_assignee(who.as_deref());
             task.assign(&who)?;
             match who.is_empty() {
                 true => println!("{} unassigned", task.id_display()),
@@ -503,7 +503,7 @@ fn cmd_repos(command: ReposCmd) -> Result<()> {
 }
 
 /// `@me` is whoever git says you are — the name that ends up in the commits.
-fn resolve_owner(who: Option<&str>) -> String {
+fn resolve_assignee(who: Option<&str>) -> String {
     match who {
         Some("@me") => git::config("user.name").unwrap_or_else(|| "me".to_string()),
         Some(who) => who.trim().to_string(),
@@ -605,12 +605,12 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
         None => None,
     };
 
-    let owner = match args.owner {
-        Some(owner) => resolve_owner(Some(&owner)),
-        None if full_form => resolve_owner(Some(&form::label(
-            "Owner:",
+    let assignee = match args.assignee {
+        Some(who) => resolve_assignee(Some(&who)),
+        None if full_form => resolve_assignee(Some(&form::label(
+            "Assignee:",
             "",
-            board.owners()?,
+            board.assignees()?,
             "who's doing it; blank for nobody, @me for you",
         )?)),
         None => String::new(),
@@ -652,7 +652,7 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
         &templates,
         NewTicket {
             title,
-            owner,
+            assignee,
             template,
             branch_type,
             parent,
