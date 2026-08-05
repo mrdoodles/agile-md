@@ -191,20 +191,32 @@ struct App {
     quit: bool,
     /// Where things were drawn last frame, so a click can find them.
     column_areas: Vec<Rect>,
+    /// One list state per column, kept between frames: ratatui writes the
+    /// scroll offset into it, and a click needs that offset to work out which
+    /// ticket is under the pointer.
+    list_states: Vec<ListState>,
+    /// The same, for whichever dialog is open.
+    dialog_state: ListState,
     settings_area: Rect,
     dialog_area: Rect,
 }
 
 impl App {
     fn new(board: Board) -> Result<App> {
-        let templates = Templates::load(&board)?;
         // The board you're standing in is always in the list, registered or
         // not; the rest come from `amd repos`.
         let repos = Registry::load().boards(Some(&board));
+        App::build(board, repos, Settings::load())
+    }
+
+    /// The half that takes what it needs, so a test can build one without
+    /// reading the user's registry or their theme.
+    fn build(board: Board, repos: Vec<Entry>, settings: Settings) -> Result<App> {
+        let templates = Templates::load(&board)?;
         let mut app = App {
             board,
             templates,
-            settings: Settings::load(),
+            settings,
             repos,
             repo: None,
             assignee_filter: None,
@@ -216,6 +228,8 @@ impl App {
             status: String::new(),
             quit: false,
             column_areas: vec![Rect::ZERO; Column::ALL.len()],
+            list_states: vec![ListState::default(); Column::ALL.len()],
+            dialog_state: ListState::default(),
             settings_area: Rect::ZERO,
             dialog_area: Rect::ZERO,
         };
@@ -474,6 +488,7 @@ impl App {
         match &mut self.mode {
             Mode::Settings { selected, .. } => {
                 if let Some(row) = row_in(self.dialog_area, at)
+                    && let Some(row) = self.dialog_state.offset().checked_add(row)
                     && row < ThemeName::all().len()
                 {
                     *selected = row;
@@ -493,6 +508,7 @@ impl App {
             }
             Mode::Repos { .. } => {
                 if let Some(row) = row_in(self.dialog_area, at)
+                    && let Some(row) = self.dialog_state.offset().checked_add(row)
                     && row <= self.repos.len()
                 {
                     self.choose_repo(row);
@@ -500,6 +516,7 @@ impl App {
             }
             Mode::Assignees { .. } => {
                 if let Some(row) = row_in(self.dialog_area, at)
+                    && let Some(row) = self.dialog_state.offset().checked_add(row)
                     && row < self.assignees.len() + 2
                 {
                     self.choose_assignee(row);
@@ -513,7 +530,10 @@ impl App {
                         continue;
                     }
                     self.column = index;
+                    // The visual row is not the index once a column has
+                    // scrolled: the offset ratatui left in the state is.
                     if let Some(row) = row_in(area, at)
+                        && let Some(row) = self.list_states[index].offset().checked_add(row)
                         && row < self.columns[index].len()
                     {
                         // Clicking the row that's already selected opens it.
@@ -733,7 +753,11 @@ impl App {
         let columns = Layout::horizontal([Constraint::Ratio(1, 3); 3]).split(board);
         for (index, area) in columns.iter().enumerate() {
             self.column_areas[index] = *area;
-            self.draw_column(frame, *area, index, &palette);
+            // Lifted out and put back so the column and its state can be
+            // borrowed at the same time; ratatui updates the offset in place.
+            let mut state = std::mem::take(&mut self.list_states[index]);
+            self.draw_column(frame, *area, index, &palette, &mut state);
+            self.list_states[index] = state;
         }
         self.draw_footer(frame, footer, &palette);
 
@@ -810,7 +834,14 @@ impl App {
         );
     }
 
-    fn draw_column(&self, frame: &mut Frame, area: Rect, index: usize, palette: &ThemePalette) {
+    fn draw_column(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        index: usize,
+        palette: &ThemePalette,
+        state: &mut ListState,
+    ) {
         let column = Column::ALL[index];
         let tasks = &self.columns[index];
         let active = index == self.column && matches!(self.mode, Mode::Board);
@@ -828,7 +859,7 @@ impl App {
                 .iter()
                 .map(|card| {
                     let task = &card.task;
-                    let labels = labels(task);
+                    let labels = labels(card);
                     let mut spans = vec![Span::raw("  ".repeat(card.depth))];
                     if show_repo && let Some(entry) = self.repos.get(card.repo) {
                         spans.push(Span::styled(
@@ -882,11 +913,8 @@ impl App {
                     .add_modifier(Modifier::BOLD),
             );
 
-        let mut state = ListState::default();
-        if !tasks.is_empty() && active {
-            state.select(Some(self.selected[index]));
-        }
-        frame.render_stateful_widget(list, area, &mut state);
+        state.select((!tasks.is_empty() && active).then(|| self.selected[index]));
+        frame.render_stateful_widget(list, area, state);
     }
 
     fn draw_detail(&mut self, frame: &mut Frame, body: &str, scroll: u16, palette: &ThemePalette) {
@@ -987,9 +1015,10 @@ impl App {
             .block(dialog(palette, title, " enter choose  esc cancel "))
             .style(Style::new().bg(palette.bg))
             .highlight_style(Style::new().bg(palette.selection).fg(palette.fg));
-        let mut state = ListState::default();
+        let mut state = std::mem::take(&mut self.dialog_state);
         state.select(Some(selected.min(choices.len().saturating_sub(1))));
         frame.render_stateful_widget(list, area, &mut state);
+        self.dialog_state = state;
     }
 
     fn draw_settings(&mut self, frame: &mut Frame, selected: usize, palette: &ThemePalette) {
@@ -1011,9 +1040,10 @@ impl App {
             .block(dialog(palette, " Theme ", " enter save  esc cancel "))
             .style(Style::new().bg(palette.bg))
             .highlight_style(Style::new().bg(palette.selection).fg(palette.fg));
-        let mut state = ListState::default();
+        let mut state = std::mem::take(&mut self.dialog_state);
         state.select(Some(selected));
         frame.render_stateful_widget(list, area, &mut state);
+        self.dialog_state = state;
     }
 }
 
@@ -1046,9 +1076,21 @@ fn row_in(area: Rect, at: Position) -> Option<usize> {
     (at.y >= first).then(|| (at.y - first) as usize)
 }
 
-/// The ticket's branch type, as shown beside its title.
-fn labels(task: &Task) -> String {
-    task.branch_type().unwrap_or_default()
+/// The ticket's branch type, and a marker when its parent is in another column
+/// — the same shorthand the printed board uses, so a child doesn't look
+/// orphaned just because its parent has moved on.
+fn labels(card: &Card) -> String {
+    [
+        card.task.branch_type(),
+        (card.depth == 0)
+            .then(|| card.task.parent())
+            .flatten()
+            .map(|parent| format!("^{parent}")),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<String>>()
+    .join(" ")
 }
 
 /// Columns read left-to-right as work progresses; the palette supplies the
@@ -1153,5 +1195,128 @@ mod tests {
         assert_eq!(form.assignee, "tim");
         // The dropdown row has no text to type into.
         assert!(form.field_mut(BRANCH_TYPE_ROW).is_none());
+    }
+}
+
+#[cfg(test)]
+mod board_tests {
+    use super::*;
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    use std::fs;
+
+    /// A board with `count` tickets in todo/, and an App looking at it —
+    /// no registry, no saved theme, nothing outside the temp directory.
+    fn app(count: usize) -> (tempfile::TempDir, App) {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let board = Board::at(dir.path().join("tasks"));
+        board.create().expect("board");
+        for id in 1..=count {
+            let name = format!("{id:03}-ticket-{id}.md");
+            let body = format!("---\nid: \"{id:03}\"\ntitle: \"Ticket {id}\"\n---\n");
+            fs::write(board.dir(Column::Todo).join(name), body).expect("ticket");
+        }
+        let entry = Entry::new(dir.path().to_path_buf());
+        let app = App::build(board, vec![entry], Settings::default()).expect("app");
+        (dir, app)
+    }
+
+    /// Draw once into a fixed-size buffer, the way a real terminal would.
+    fn draw(app: &mut App, width: u16, height: u16) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
+        terminal.draw(|frame| app.draw(frame)).expect("draw");
+        terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>()
+    }
+
+    #[test]
+    fn a_column_scrolls_to_keep_the_selection_in_view() {
+        let (_dir, mut app) = app(20);
+        // Nine rows of list in a twelve-row terminal, so this is off-screen.
+        app.selected[0] = 15;
+        let screen = draw(&mut app, 100, 12);
+        assert!(
+            screen.contains("Ticket 16"),
+            "the selection has to be visible"
+        );
+        assert!(
+            app.list_states[0].offset() > 0,
+            "the column should have scrolled"
+        );
+    }
+
+    #[test]
+    fn a_click_lands_on_the_ticket_under_the_pointer_not_the_row_number() {
+        let (_dir, mut app) = app(20);
+        app.selected[0] = 15;
+        draw(&mut app, 100, 12);
+        let offset = app.list_states[0].offset();
+        assert!(offset > 0, "this only means anything once it has scrolled");
+
+        // The top row of the list, just inside the border.
+        let area = app.column_areas[0];
+        app.click(Position::new(area.x + 2, area.y + 1));
+        assert_eq!(
+            app.selected[0], offset,
+            "clicking the first visible row selects the ticket shown there"
+        );
+    }
+
+    #[test]
+    fn everything_fits_in_a_small_terminal() {
+        let (_dir, mut app) = app(20);
+        // Nothing here should panic, however little room there is.
+        for (width, height) in [(20, 6), (40, 8), (200, 60)] {
+            draw(&mut app, width, height);
+        }
+    }
+
+    #[test]
+    fn a_rejected_ticket_keeps_what_you_typed() {
+        let (_dir, mut app) = app(3);
+        app.mode = Mode::New(NewForm {
+            title: "Worth keeping".to_string(),
+            parent: "99".to_string(),
+            ..Default::default()
+        });
+        app.create();
+
+        assert!(app.status.contains("no task matches"), "{}", app.status);
+        match &app.mode {
+            // Still on the form, with the typing intact: an error shouldn't
+            // cost you the ticket you were part-way through writing.
+            Mode::New(form) => assert_eq!(form.title, "Worth keeping"),
+            _ => panic!("the form should still be open"),
+        }
+        assert_eq!(app.board.tasks().unwrap().len(), 3, "nothing was created");
+    }
+
+    #[test]
+    fn a_filter_that_hides_everything_leaves_a_usable_board() {
+        let (_dir, mut app) = app(5);
+        app.selected[0] = 4;
+        app.assignee_filter = Some("nobody-has-this-name".to_string());
+        app.reload().expect("reload");
+
+        assert!(app.columns[0].is_empty());
+        assert!(app.current().is_none(), "nothing to act on, and no panic");
+        // The old selection must not survive as an out-of-range index.
+        app.move_selection(1);
+        app.shift(1);
+        let screen = draw(&mut app, 80, 20);
+        assert!(screen.contains("(empty)"), "{screen}");
+    }
+
+    #[test]
+    fn an_empty_board_draws_and_selects_nothing() {
+        let (_dir, mut app) = app(0);
+        let screen = draw(&mut app, 80, 20);
+        assert!(screen.contains("(empty)"), "{screen}");
+        assert!(app.current().is_none());
     }
 }

@@ -139,6 +139,7 @@ pub fn tags(default: &str, known: Vec<String>) -> Result<Vec<String>> {
     } else {
         format!("comma separated; tab completes: {}", known.join(", "))
     };
+
     let answer = convert(
         Text::new("Tags:")
             .with_initial_value(default)

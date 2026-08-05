@@ -27,7 +27,7 @@ pub struct Entry {
 }
 
 impl Entry {
-    fn new(root: PathBuf) -> Entry {
+    pub fn new(root: PathBuf) -> Entry {
         let name = root
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
