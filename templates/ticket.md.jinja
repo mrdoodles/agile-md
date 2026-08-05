@@ -1,12 +1,13 @@
 ---
 id: {{ id | yaml }}
 title: {{ title | yaml }}
-ticket: {{ template | yaml }}
-assignee: {{ assignee | yaml }}
+owner: {{ owner | yaml }}
+branch-type: {{ branch_type | yaml }}
+branch-name: {{ branch_name | yaml }}
 parent: {{ parent | yaml }}
 related: [{{ related | join(",") }}]
-created: {{ created | yaml }}
 tags: [{{ tags | join(",") }}]
+created: {{ created | yaml }}
 ---
 
 {% if parent %}
@@ -18,6 +19,6 @@ tags: [{{ tags | join(",") }}]
 ## Notes
 
 
-## Checklist
+## Acceptance criteria
 
 - [ ]

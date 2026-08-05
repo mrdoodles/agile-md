@@ -12,9 +12,9 @@ no daemon, no database.
   is consistent by construction and yours to change.
 - **The template is the form.** Leave an argument out in a terminal and `amd`
   asks — including the fields your own template declares.
-- **One type per ticket.** `admin`, or the conventional-commit type of the
-  change it makes. Development work is tracked on a branch named from that type
-  — `amd start` puts you on `feature/add-login` — and admin work gets none.
+- **One flexible ticket.** No ticket types to choose between: a `branch-type`
+  gives it a branch (`amd start` puts you on `bugfix/crash-on-save`), and
+  without one it's a ticket with nothing to check out.
 - **One command, any repo.** Install `amd` once on your PATH; it finds the
   board at `<repository-root>/tasks` from wherever you are.
 
@@ -40,7 +40,7 @@ In any git repository:
 
 ```bash
 amd init                          # scaffold tasks/{todo,doing,done} here
-amd new "Publish to Marketplace" --type feat --epic launch
+amd new "Publish to Marketplace" --branch-type feature --owner @me
 amd board                         # show all columns (the default)
 amd start 1                       # todo -> doing, and switch to feature/publish-to-marketplace
 amd done  1                       # doing -> done
@@ -54,111 +54,55 @@ amd link  1 3                     # relate two tickets
 `amd` works from any subdirectory — it resolves the board from the repo root.
 Set `AMD_DIR` to use a board directory other than `tasks`.
 
-## Ticket types
+## What's on a ticket
 
-A ticket's `type` is one field with one list: **`admin`**, or the
-conventional-commit type of the change it makes.
+One kind of ticket, with sensible defaults — fill in what applies and leave the
+rest:
 
-| type | branch | frontmatter |
-| --- | --- | --- |
-| `admin` | none — a rota or a renewal has nothing to check out | no `type`, no `branch` |
-| `feat` `fix` `docs` `style` `refactor` `perf` `test` `build` `ci` `chore` `revert` | `<prefix>/<title>` | `type`, `branch` |
+| Field         | | |
+| ------------- | --- | --- |
+| `id`          | automatic | `007`, from the board's counter |
+| `title`       | required | names the file, and the branch |
+| `owner`       | optional | who's doing it; assignable later |
+| `branch-type` | optional | `feature`, `bugfix`, `hotfix`, `release`, `chore` |
+| `branch-name` | automatic | `<branch-type>/<title>`, empty without a branch type |
+| `parent`      | optional | the ticket this sits under, any depth |
+| `related`     | optional | ids of tickets this depends on |
+| `tags`        | optional | free-form |
+| `created`     | automatic | the date |
 
-```bash
-amd new "Add login"                        # feat, the default
-amd new "Renew the certificates" --type admin
-amd start 1                                # development: switches to feature/add-login
-amd start 2                                # admin: "admin tickets don't use branches"
-```
-
-Which template renders a ticket follows from the type — `admin` gets the admin
-template, everything else the development one — so there is nothing else to
-choose. `--template` still overrides it for a board with templates of its own,
-and the rule for whether a branch appears lives in the template: one that
-records a `branch` gets one.
-
-## Labels and nesting
-
-On top of the ticket type:
-
-| Field    | On          | Values                                                     |
-| -------- | ----------- | ---------------------------------------------------------- |
-| `type`   | development | conventional-commit types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert` (default `feat`; the list is `AMD_TYPES`) |
-| `parent` | both        | the ticket this one sits under — optional, and any depth     |
-| `assignee` | both      | who it belongs to — optional, `@me` resolves to your git name |
-| `tags`   | both        | free-form, completed against the tags already on the board   |
-
-**One `parent` instead of epic and story fields.** Nesting gives you both, and
-anything past them, without deciding up front which level a ticket is:
+**The branch type is what makes a ticket a piece of code work**, and it's empty
+by default. A ticket without one is still a ticket — a rota, an approval, a
+renewal — it just has nothing to check out:
 
 ```bash
-amd new "Checkout revamp"
-amd new "Guest checkout" --parent 1
-amd new "Address form"   --parent 2
+amd new "Renew the certificates"                    # no branch
+amd new "Crash on save" --branch-type bugfix -o alex
+amd start 1     # moves it; "no branch type on this ticket"
+amd start 2     # moves it and switches to bugfix/crash-on-save
 ```
 
-```
-TODO  (4)
-├── [001] Checkout revamp  (feat)
-│   └── [002] Guest checkout  (feat)
-│       └── [003] Address form  (feat)
-└── [004] Unrelated chore  (chore)
-```
-
-The link is navigable from both ends: the child gets a `## Parent` wikilink, the
-parent a `## Children` list, and on a terminal that supports hyperlinks the ids
-on the board open the ticket when you click them.
-
-```markdown
-## Parent
-
-[[001-checkout-revamp]]
-```
-
-Children are nested inside their column — a child whose parent is in another
-column stays at the top level with a `^001` marker, since the columns are what
-the board is for. Everything is ordered by id at every level.
-
-The change type **names** the branch. Ticket types are *commit* types, branches
-follow the *branch* convention, and `amd` maps between them — so both halves
-satisfy [conventional-validator](https://github.com/mrdoodles/conventional-validator):
-
-| change type                                     | branch prefix |
-| ----------------------------------------------- | ------------- |
-| `feat`                                          | `feature/`    |
-| `fix`                                           | `bugfix/`     |
-| `revert`                                        | `hotfix/`     |
-| `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore` | `chore/`      |
-
-```bash
-amd new "Crash on save" --type fix     # created todo/003-crash-on-save.md (bugfix/crash-on-save)
-amd start 3 --branch spike/try-it      # …or a branch you name
-amd start 3 --no-branch                # …or none at all (AMD_NO_BRANCH=1 for good)
-```
+The branch types are the ones
+[conventional-validator](https://github.com/mrdoodles/conventional-validator)
+accepts, so a branch made from a ticket passes its check. `AMD_BRANCH_TYPES`
+changes the list.
 
 The branch name is written into the ticket at creation, so you can see it — and
 edit it — before any work starts. Because the title becomes a branch, it's
 **validated when you type it**: a title with nothing sluggable in it is rejected
 rather than producing a ticket that can never start.
 
-## The junk drawer
-
-`amd rm <ref>` takes a ticket off the board and into `tasks/junk/`:
+## Owners
 
 ```bash
-amd rm 3            # junked 003-wrong-idea.md -> junk/
-amd rm wrong-idea   # by slug, like everything else
+amd new "Add login" --owner alex   # or -o @me for whoever git says you are
+amd assign 3 sam                   # give an existing ticket an owner
+amd assign 3                       # take it off them
 ```
 
-Nothing is deleted — the file is still there if you want it back
-(`mv tasks/junk/003-wrong-idea.md tasks/todo/`). The drawer keeps itself out of
-git: `tasks/junk/.gitignore` ignores its own contents, so a junked ticket leaves
-the history rather than lingering in it. For a ticket that was committed, that
-means `git rm --cached` and a move, which shows up as a deletion to commit like
-any other board change.
-
-Junked tickets **keep their ids** — the board's counter remembers them, so
-nothing new takes an id that `parent` or `related` somewhere may still name.
+Tickets are meant to be created now and given an owner later, so `owner` starts
+empty. It shows on the board as `@sam`, and in the TUI `a` narrows the board to
+one person.
 
 ## Related tickets
 

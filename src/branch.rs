@@ -1,23 +1,16 @@
-//! Ticket types, labels, and the branch names they produce.
+//! Branch types, and the branch names they produce.
 //!
-//! There are two kinds of ticket — a **development** ticket and an **admin**
-//! ticket — and each is a template. Development work gets a branch; admin work
-//! (a rota, a renewal, an approval) has nothing to check out, so it doesn't.
-//! The rule lives in the template itself: a ticket whose template records a
-//! `branch` gets one, which means a custom template opts in by using it.
+//! There is one kind of ticket. What makes it a piece of code work is that it
+//! carries a **branch type** — `feature`, `bugfix`, `hotfix`, `release`,
+//! `chore` — from which the branch name is worked out: a `bugfix` ticket
+//! titled "Crash on save" is worked on `bugfix/crash-on-save`.
 //!
-//! On top of that every ticket carries labels:
+//! The type is **optional and empty by default**. A ticket without one is
+//! still a ticket — a rota, an approval, a renewal — it just has nothing to
+//! check out, so `amd start` moves it and leaves the working tree alone.
 //!
-//! - `type` — a conventional-commit type (`feat`, `fix`, `docs`, …) on
-//!   development tickets. It decides the branch prefix.
-//! - `epic` — optional, groups tasks across a body of work.
-//! - `story` — optional, groups tasks within an epic.
-//!
-//! The type is a *commit* type, but branches follow the *branch* convention
-//! (`feature/`, `bugfix/`, `hotfix/`, `release/`, `chore/`) — the same split
-//! mrdoodles/conventional-validator enforces. `prefix()` maps between them, so
-//! a `feat` ticket titled "Add login" starts work on `feature/add-login`: the
-//! commits and the branch both validate.
+//! The list matches the branch types mrdoodles/conventional-validator accepts,
+//! so a branch made from a ticket passes its check.
 
 use std::env;
 
@@ -25,129 +18,81 @@ use anyhow::{Result, bail};
 
 use crate::task;
 
-/// Conventional-commit types, the accepted values of the `type` label.
-/// Override the list with `AMD_TYPES="feat,fix,docs"`.
-pub const DEFAULT_TYPES: [&str; 11] = [
-    "feat", "fix", "docs", "style", "refactor", "perf", "test", "build", "ci", "chore", "revert",
-];
+/// The branch types a ticket may carry. Override the list with
+/// `AMD_BRANCH_TYPES="feature,bugfix,spike"`.
+pub const DEFAULT_BRANCH_TYPES: [&str; 5] = ["feature", "bugfix", "hotfix", "release", "chore"];
 
-/// Commit type -> branch prefix. Anything unmapped becomes `chore`, which is
-/// what the branch convention has for "everything else".
-const PREFIXES: [(&str, &str); 3] = [("feat", "feature"), ("fix", "bugfix"), ("revert", "hotfix")];
+/// What an empty branch type looks like in a picker.
+pub const NONE: &str = "(none)";
 
-/// Fallback branch prefix for types with no specific mapping.
-const DEFAULT_PREFIX: &str = "chore";
-
-/// The one type an admin ticket carries. It isn't a conventional-commit type —
-/// it's the answer to "this isn't code", which is why it lives alongside them
-/// in a single list rather than in a second field.
-pub const ADMIN: &str = "admin";
-
-/// Everything a ticket's `type` may be: `admin` plus the change types. One
-/// question instead of two — the ticket type and the change it makes were
-/// always the same decision.
-pub fn ticket_types() -> Vec<String> {
-    let mut all = vec![ADMIN.to_string()];
-    all.extend(types());
-    all
-}
-
-/// Split a chosen type into the template that renders it and the change type
-/// that names its branch. `admin` has no change type and so gets no branch.
-pub fn resolve(chosen: &str) -> (String, String) {
-    if chosen == ADMIN {
-        (ADMIN.to_string(), String::new())
-    } else {
-        (
-            crate::templates::DEFAULT_TEMPLATE.to_string(),
-            chosen.to_string(),
-        )
-    }
-}
-
-/// Check a chosen type against the accepted list.
-pub fn validate_ticket_type(chosen: &str) -> Result<()> {
-    let types = ticket_types();
-    if types.iter().any(|known| known == chosen) {
-        return Ok(());
-    }
-    bail!(
-        "unknown type '{chosen}' (expected one of: {}; set AMD_TYPES to change the list)",
-        types.join(", ")
-    )
-}
-
-/// The type labels this board accepts.
-pub fn types() -> Vec<String> {
-    match env::var("AMD_TYPES") {
+/// The branch types this board accepts.
+pub fn branch_types() -> Vec<String> {
+    match env::var("AMD_BRANCH_TYPES") {
         Ok(raw) if !raw.trim().is_empty() => {
             let types: Vec<String> = raw
                 .split(',')
                 .map(|kind| kind.trim().to_string())
                 .filter(|kind| !kind.is_empty())
                 .collect();
-            if types.is_empty() {
-                default_types()
-            } else {
-                types
-            }
+            if types.is_empty() { defaults() } else { types }
         }
-        _ => default_types(),
+        _ => defaults(),
     }
 }
 
-fn default_types() -> Vec<String> {
-    DEFAULT_TYPES.iter().map(|kind| kind.to_string()).collect()
-}
-
-/// The type used when `--type` isn't given: the first of the list.
-pub fn default_type() -> String {
-    types()
-        .first()
-        .cloned()
-        .unwrap_or_else(|| DEFAULT_TYPES[0].to_string())
-}
-
-/// The branch prefix a type label works on.
-pub fn prefix(kind: &str) -> String {
-    PREFIXES
+fn defaults() -> Vec<String> {
+    DEFAULT_BRANCH_TYPES
         .iter()
-        .find(|(commit_type, _)| *commit_type == kind)
-        .map(|(_, prefix)| (*prefix).to_string())
-        // A custom AMD_TYPES entry that is already a branch prefix keeps its
-        // own name rather than collapsing to chore.
-        .or_else(|| {
-            ["feature", "bugfix", "hotfix", "release", "chore"]
-                .iter()
-                .find(|prefix| **prefix == kind)
-                .map(|prefix| (*prefix).to_string())
-        })
-        .unwrap_or_else(|| DEFAULT_PREFIX.to_string())
+        .map(|kind| (*kind).to_string())
+        .collect()
 }
 
-/// Check a type label against the accepted list.
-pub fn validate_type(kind: &str) -> Result<()> {
-    let types = types();
+/// The choices a form offers: no branch, then each branch type.
+pub fn choices() -> Vec<String> {
+    let mut all = vec![NONE.to_string()];
+    all.extend(branch_types());
+    all
+}
+
+/// Check a branch type against the accepted list. Empty is always fine — that's
+/// a ticket with no branch.
+pub fn validate_branch_type(kind: &str) -> Result<()> {
+    if kind.is_empty() || kind == NONE {
+        return Ok(());
+    }
+    let types = branch_types();
     if types.iter().any(|known| known == kind) {
         return Ok(());
     }
     bail!(
-        "unknown type '{kind}' (expected one of: {}; set AMD_TYPES to change the list)",
+        "unknown branch type '{kind}' (expected one of: {}; set AMD_BRANCH_TYPES to change the list)",
         types.join(", ")
     )
 }
 
-/// `("feat", "Add login")` -> `feature/add-login`.
+/// `(none)` and an empty answer mean the same thing: no branch.
+pub fn normalise(kind: &str) -> String {
+    match kind.trim() {
+        NONE => String::new(),
+        kind => kind.to_string(),
+    }
+}
+
+/// `("bugfix", "Crash on save")` -> `bugfix/crash-on-save`. An empty branch
+/// type gives an empty name: the ticket simply has no branch.
 pub fn for_title(kind: &str, title: &str) -> Result<String> {
+    let kind = normalise(kind);
+    if kind.is_empty() {
+        return Ok(String::new());
+    }
     let slug = task::slugify(title);
     if slug.is_empty() {
         bail!(
             "title '{title}' has no letters or numbers to build a branch name from \
-             (it becomes the branch {}/<title>)",
-            prefix(kind)
+             (it becomes the branch {kind}/<title>)"
         );
     }
-    let name = format!("{}/{slug}", prefix(kind));
+    let name = format!("{kind}/{slug}");
     validate(&name)?;
     Ok(name)
 }
@@ -155,7 +100,7 @@ pub fn for_title(kind: &str, title: &str) -> Result<String> {
 /// Reject anything `git check-ref-format --branch` would.
 ///
 /// Worth doing properly: a branch name can also arrive from a ticket's
-/// `branch:` frontmatter or from `--branch`, which are arbitrary text.
+/// `branch-name` frontmatter or from `--branch`, which are arbitrary text.
 pub fn validate(name: &str) -> Result<()> {
     if name.is_empty() {
         bail!("branch name is empty");
@@ -191,9 +136,8 @@ pub fn validate(name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Check a title early, at the prompt: it has to make a filename, and for a
-/// development ticket that filename slug is also the branch. Catching it here
-/// beats leaving a ticket that can never start.
+/// Check a title at the prompt: it has to make a filename, and for a ticket
+/// with a branch type that slug is also the branch.
 pub fn validate_sluggable(title: &str) -> Result<()> {
     if title.trim().is_empty() {
         bail!("a title is required");
@@ -209,35 +153,45 @@ mod tests {
     use super::*;
 
     #[test]
-    fn commit_types_map_onto_branch_types() {
-        assert_eq!(prefix("feat"), "feature");
-        assert_eq!(prefix("fix"), "bugfix");
-        assert_eq!(prefix("revert"), "hotfix");
-        // Everything else is a chore branch.
-        for kind in ["docs", "style", "refactor", "perf", "test", "build", "ci"] {
-            assert_eq!(prefix(kind), "chore", "{kind}");
-        }
-        // A custom type that is already a branch prefix keeps its own name.
-        assert_eq!(prefix("release"), "release");
+    fn the_types_are_the_conventional_branch_ones() {
+        assert_eq!(branch_types(), DEFAULT_BRANCH_TYPES);
+        assert_eq!(choices()[0], NONE);
+        assert!(validate_branch_type("bugfix").is_ok());
+        let err = validate_branch_type("feat").unwrap_err().to_string();
+        assert!(err.contains("unknown branch type 'feat'"), "{err}");
+        assert!(err.contains("AMD_BRANCH_TYPES"), "{err}");
     }
 
     #[test]
-    fn a_title_becomes_a_conventional_branch() {
-        assert_eq!(for_title("feat", "Add login").unwrap(), "feature/add-login");
+    fn no_branch_type_means_no_branch() {
+        assert!(validate_branch_type("").is_ok());
+        assert!(validate_branch_type(NONE).is_ok());
+        assert_eq!(for_title("", "Renew the certs").unwrap(), "");
+        assert_eq!(for_title(NONE, "Renew the certs").unwrap(), "");
+        assert_eq!(normalise(NONE), "");
+        assert_eq!(normalise(" bugfix "), "bugfix");
+    }
+
+    #[test]
+    fn a_branch_type_and_a_title_make_the_branch_name() {
         assert_eq!(
-            for_title("fix", "Crash on SAVE!").unwrap(),
+            for_title("bugfix", "Crash on SAVE!").unwrap(),
             "bugfix/crash-on-save"
         );
         assert_eq!(
-            for_title("docs", "Update README").unwrap(),
-            "chore/update-readme"
+            for_title("chore", "Ticket fields").unwrap(),
+            "chore/ticket-fields"
         );
     }
 
     #[test]
     fn a_title_with_nothing_sluggable_is_rejected() {
-        let err = for_title("feat", "***").unwrap_err().to_string();
+        let err = for_title("feature", "***").unwrap_err().to_string();
         assert!(err.contains("no letters or numbers"), "{err}");
+        assert!(validate_sluggable("   ").is_err());
+        assert!(validate_sluggable("***").is_err());
+        // With no branch type there's still a filename to make.
+        assert!(for_title("", "***").is_ok());
     }
 
     #[test]
@@ -268,22 +222,5 @@ mod tests {
         for good in ["feature/add-login", "hotfix/001-fix", "chore/deps"] {
             assert!(validate(good).is_ok(), "{good:?} should be accepted");
         }
-    }
-
-    #[test]
-    fn titles_for_admin_tickets_only_need_a_filename() {
-        assert!(validate_sluggable("Update the rota").is_ok());
-        assert!(validate_sluggable("***").is_err());
-        assert!(validate_sluggable("  ").is_err());
-    }
-
-    #[test]
-    fn the_types_are_the_conventional_commit_ones() {
-        assert_eq!(types(), DEFAULT_TYPES);
-        assert_eq!(default_type(), "feat");
-        assert!(validate_type("refactor").is_ok());
-        let err = validate_type("feature").unwrap_err().to_string();
-        assert!(err.contains("unknown type 'feature'"), "{err}");
-        assert!(err.contains("AMD_TYPES"), "{err}");
     }
 }

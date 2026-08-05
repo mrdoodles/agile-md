@@ -60,12 +60,14 @@ git add -A; git commit -qm seed
 assert "creates tasks/todo/001-first-task.md" test -f tasks/todo/001-first-task.md
 assert "title in frontmatter" grep -q '^title: "First task"$' tasks/todo/001-first-task.md
 assert "tags in frontmatter" grep -q '^tags: \[x,y\]$' tasks/todo/002-second-task.md
-assert "type label defaults to feat" grep -q '^type: "feat"$' tasks/todo/001-first-task.md
-assert "branch is recorded on the ticket" grep -q '^branch: "feature/first-task"$' tasks/todo/001-first-task.md
+assert "a new ticket has no branch type by default" \
+  grep -q '^branch-type: ""$' tasks/todo/001-first-task.md
+assert "and so has no branch name" grep -q '^branch-name: ""$' tasks/todo/001-first-task.md
+assert "a new ticket has no owner" grep -q '^owner: ""$' tasks/todo/001-first-task.md
 assert "created date is filled in" grep -qE '^created: "[0-9]{4}-[0-9]{2}-[0-9]{2}"$' tasks/todo/001-first-task.md
 
 echo "parents and the tree:"
-"${AMD}" new "Guest checkout" --type fix >/dev/null
+"${AMD}" new "Guest checkout" --branch-type bugfix >/dev/null
 "${AMD}" new "Address form" --parent 3 >/dev/null
 assert "the child records its parent id" grep -q '^parent: "003"$' tasks/todo/004-address-form.md
 assert "the child links back to the parent" \
@@ -92,40 +94,32 @@ assert "board lists the task by id and title" \
   bash -c "'${AMD}' board | grep -q '\[001\] First task'"
 assert "empty columns say so" bash -c "'${AMD}' ls doing | grep -q '(empty)'"
 
-echo "ticket types:"
-assert "tickets record their type" grep -q '^ticket: "development"$' tasks/todo/001-first-task.md
-"${AMD}" new "Renew the certificates" --type admin >/dev/null
-assert "admin tickets record their type" grep -q '^ticket: "admin"$' tasks/todo/006-renew-the-certificates.md
-assert "admin tickets carry no branch" \
-  bash -c "! grep -q '^branch:' tasks/todo/006-renew-the-certificates.md"
-assert "admin tickets carry no change type" \
-  bash -c "! grep -q '^type:' tasks/todo/006-renew-the-certificates.md"
-assert "development tickets carry both" \
-  bash -c "grep -q '^type: \"feat\"$' tasks/todo/001-first-task.md && grep -q '^branch: \"feature/first-task\"$' tasks/todo/001-first-task.md"
-assert "the type list leads with admin" \
-  bash -c "'${AMD}' new 'Nope' --type development 2>&1 | grep -q 'admin, feat, fix'"
-assert "templates lists both ticket types" \
-  bash -c "'${AMD}' templates | grep -q '^development' && '${AMD}' templates | grep -q '^admin'"
-assert "the board flags a non-development ticket" \
-  bash -c "'${AMD}' board --plain | grep -q 'Renew the certificates  (admin)'"
+echo "branch types:"
+"${AMD}" new "Crash on save" --branch-type bugfix >/dev/null
+assert "the branch type is recorded" grep -q '^branch-type: "bugfix"$' tasks/todo/006-crash-on-save.md
+assert "the branch name comes from the type and the title" \
+  grep -q '^branch-name: "bugfix/crash-on-save"$' tasks/todo/006-crash-on-save.md
+assert "an unknown branch type is rejected, listing the valid ones" \
+  bash -c "'${AMD}' new 'Nope' --branch-type feat 2>&1 | grep -q \"unknown branch type 'feat'\""
+assert "AMD_BRANCH_TYPES overrides the list" \
+  bash -c "AMD_BRANCH_TYPES='spike,chore' '${AMD}' new 'Try it' --branch-type spike >/dev/null && grep -q '^branch-name: \"spike/try-it\"\$' tasks/todo/007-try-it.md"
+assert "there is one ticket template now" \
+  bash -c "'${AMD}' templates | grep -q '^ticket' && ! '${AMD}' templates | grep -q '^admin'"
+assert "the board shows the branch type" \
+  bash -c "'${AMD}' board --plain | grep -q 'Crash on save  (bugfix)'"
 
 echo "moves (git mv) + branches:"
 git add -A; git commit -qm labels
 "${AMD}" start 1 >/dev/null
-assert "start: todo -> doing" test -f tasks/doing/001-first-task.md
-assert "start creates the ticket's branch" \
-  bash -c "git branch --show-current | grep -q '^feature/first-task$'"
-assert "the staged move travelled to the new branch" \
-  bash -c "git status --porcelain | grep -q 'tasks/doing/001-first-task.md'"
+assert "a ticket with no branch type creates no branch" \
+  bash -c "! git branch --list 'feature/first-task' | grep -q ."
+assert "it still moves to doing" test -f tasks/doing/001-first-task.md
+assert "start says why it left the branch alone" \
+  bash -c "'${AMD}' back 1 >/dev/null && '${AMD}' start 1 2>&1 | grep -q 'no branch type on this ticket'"
 git checkout -q main 2>/dev/null || git checkout -q master
 "${AMD}" start 6 >/dev/null
-assert "admin work creates no branch" \
-  bash -c "! git branch --list 'feature/renew-the-certificates' | grep -q ."
-assert "admin work still moves to doing" test -f tasks/doing/006-renew-the-certificates.md
-assert "start says why it left the branch alone" \
-  bash -c "'${AMD}' back 6 >/dev/null && '${AMD}' start 6 2>&1 | grep -q \"admin tickets don't use branches\""
-assert "development work does create a branch" \
-  bash -c "git branch --list 'feature/first-task' | grep -q ."
+assert "a ticket with a branch type gets its branch" \
+  bash -c "git branch --list 'bugfix/crash-on-save' | grep -q ."
 "${AMD}" --no-input start 3 --no-branch >/dev/null
 assert "--no-branch leaves the branch alone" \
   bash -c "! git branch --list 'bugfix/guest-checkout' | grep -q ."
@@ -149,41 +143,41 @@ echo "refs + ids:"
 assert "find by slug substring" test -f tasks/doing/002-second-task.md
 git checkout -q main 2>/dev/null || git checkout -q master
 "${AMD}" new "Third" >/dev/null
-assert "ids continue across columns (007)" test -f tasks/todo/007-third.md
+assert "ids continue across columns (008)" test -f tasks/todo/008-third.md
 assert "unknown ref fails" bash -c "! '${AMD}' show 99"
 assert "ambiguous ref fails" bash -c "! '${AMD}' show task"
-assert "show prints the file" bash -c "'${AMD}' show 007 | grep -q '^title: \"Third\"$'"
+assert "show prints the file" bash -c "'${AMD}' show 008 | grep -q '^title: \"Third\"$'"
 
 echo "templates:"
 assert "templates says where each ticket type comes from" \
-  bash -c "'${AMD}' templates | grep -q '^development  *built-in$'"
+  bash -c "'${AMD}' templates | grep -q '^ticket  *built-in$'"
 assert "unknown template fails with a hint" \
   bash -c "'${AMD}' new 'Nope' --template nope 2>&1 | grep -q 'amd templates'"
 assert "eject writes an editable copy into the board" \
-  bash -c "'${AMD}' templates eject development >/dev/null && test -f tasks/templates/development.md.jinja"
+  bash -c "'${AMD}' templates eject ticket >/dev/null && test -f tasks/templates/ticket.md.jinja"
 assert "eject refuses to clobber without --force" \
-  bash -c "! '${AMD}' templates eject development"
-printf -- '---\nid: {{ id | yaml }}\ntitle: {{ title | yaml }}\ntype: {{ type | yaml }}\nowner: {{ extra.owner | yaml }}\n---\n\n## Custom\n' \
-  > tasks/templates/development.md.jinja
+  bash -c "! '${AMD}' templates eject ticket"
+printf -- '---\nid: {{ id | yaml }}\ntitle: {{ title | yaml }}\ntype: {{ branch_type | yaml }}\nowner: {{ extra.owner | yaml }}\n---\n\n## Custom\n' \
+  > tasks/templates/ticket.md.jinja
 assert "board template overrides the built-in" \
   bash -c "'${AMD}' new 'Overridden' -s owner=tim >/dev/null && grep -q '^## Custom$' tasks/todo/*-overridden.md"
 assert "--set values reach the template" \
   bash -c "grep -q '^owner: \"tim\"$' tasks/todo/*-overridden.md"
 assert "labels reach a custom template" \
-  bash -c "grep -q '^type: \"feat\"$' tasks/todo/*-overridden.md"
+  bash -c "grep -q '^type: \"\"$' tasks/todo/*-overridden.md"
 assert "templates list shows the board override" \
-  bash -c "'${AMD}' templates | grep -q 'templates/development.md.jinja'"
+  bash -c "'${AMD}' templates | grep -q 'templates/ticket.md.jinja'"
 printf -- '---\nid: {{ id | yaml }}\nowner: {{ extra.owner | yaml }}\ndue: {{ extra["due date"] | yaml }}\n---\n' \
-  > tasks/templates/development.md.jinja
+  > tasks/templates/ticket.md.jinja
 assert "a template field with no value is an error, naming the flag" \
   bash -c "'${AMD}' new 'Needs fields' 2>&1 | grep -q -- '--set owner='"
 assert "every missing field is listed" \
   bash -c "'${AMD}' new 'Needs fields' 2>&1 | grep -q -- '--set due date='"
-printf 'title: {{ titel }}\n' > tasks/templates/development.md.jinja
+printf 'title: {{ titel }}\n' > tasks/templates/ticket.md.jinja
 assert "a typo'd variable is an error, not a blank line" \
   bash -c "! '${AMD}' new 'Broken' 2>&1 | grep -q '^title: $'"
 assert "the template error names the template and line" \
-  bash -c "'${AMD}' new 'Broken' 2>&1 | grep -q \"template 'development'\""
+  bash -c "'${AMD}' new 'Broken' 2>&1 | grep -q \"template 'ticket'\""
 rm -rf tasks/templates
 
 echo "the body editor:"
@@ -220,18 +214,19 @@ assert "the counter records the next id" \
 assert "a deleted ticket does not hand its id back" \
   bash -c "'${AMD}' new 'Doomed' >/dev/null; id=\$(ls tasks/todo | grep doomed | cut -d- -f1); rm tasks/todo/\${id}-doomed.md; '${AMD}' new 'After the delete' >/dev/null; ! test -f tasks/todo/\${id}-after-the-delete.md"
 
-echo "assignees:"
-assert "a new ticket is unassigned" \
-  bash -c "grep -q '^assignee: \"\"$' tasks/*/001-first-task.md"
-"${AMD}" new "Assigned at creation" -a alex >/dev/null
-assert "--assignee sets it at creation" \
-  bash -c "grep -q '^assignee: \"alex\"$' tasks/todo/*-assigned-at-creation.md"
+echo "owners:"
+assert "a new ticket has nobody on it" \
+  bash -c "grep -q '^owner: \"\"$' tasks/*/001-first-task.md"
+"${AMD}" new "Owned at creation" -o alex >/dev/null
+assert "--owner sets it at creation" \
+  bash -c "grep -q '^owner: \"alex\"$' tasks/todo/*-owned-at-creation.md"
 assert "amd assign sets it afterwards" \
-  bash -c "'${AMD}' assign 1 sam >/dev/null && grep -q '^assignee: \"sam\"$' tasks/*/001-first-task.md"
+  bash -c "'${AMD}' assign 1 sam >/dev/null && grep -q '^owner: \"sam\"$' tasks/*/001-first-task.md"
 assert "amd assign with no name clears it" \
-  bash -c "'${AMD}' assign 1 >/dev/null && grep -q '^assignee: \"\"$' tasks/*/001-first-task.md"
+  bash -c "'${AMD}' assign 1 >/dev/null && grep -q '^owner: \"\"$' tasks/*/001-first-task.md"
 assert "@me resolves to the git user" \
-  bash -c "'${AMD}' assign 1 @me >/dev/null && grep -q '^assignee: \"t\"$' tasks/*/001-first-task.md"
+  bash -c "'${AMD}' assign 1 @me >/dev/null && grep -q '^owner: \"t\"$' tasks/*/001-first-task.md"
+assert "the board shows the owner" bash -c "'${AMD}' board --plain | grep -q '@t'"
 
 echo "repositories:"
 assert "working in a repository remembers it" \
@@ -271,8 +266,8 @@ assert "a task cannot be related to itself" \
 "${AMD}" new "One way only" >/dev/null
 assert "amd link --one-way leaves the other end alone" \
   bash -c "'${AMD}' link 2 one-way --one-way >/dev/null && ! grep -q '002' tasks/todo/*-one-way-only.md"
-assert "admin tickets carry the list too" \
-  bash -c "grep -q '^related: \[\]$' tasks/*/006-renew-the-certificates.md"
+assert "a ticket with no branch carries the list too" \
+  bash -c "grep -q '^related: \[\]$' tasks/*/*-owned-at-creation.md"
 
 echo "pipes:"
 assert "the board survives a closed pipe" \

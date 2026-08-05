@@ -89,48 +89,33 @@ one implementation of the board.
   `AMD_NO_BRANCH` (never touch branches), `NO_COLOR`/`--plain` (plain board),
   `EDITOR` (for `amd edit`).
 
-## Ticket types, labels and branches (`src/branch.rs`)
+## Ticket fields (`src/branch.rs`, `templates/ticket.md.jinja`)
 
-- **One `type` field**: `admin`, or a conventional-commit type. `ticket_types()`
-  is that list and `resolve()` splits the answer into a template and a change
-  type — `admin` maps to the admin template with no change type, everything else
-  to the development template. One question in every front end, not two.
-- **The template decides whether there's a branch.** `Templates::branches()`
-  asks whether the template source references `branch`; the development one
-  does, the admin one doesn't. `Templates::uses()` generalises it: a template
-  that shows `type` is asked for a change type even when it records no branch,
-  so the two questions aren't welded together. No flag, no separate registry, and a custom
-  template opts in just by using the variable. `templates::references()` is
-  word-boundary aware so `branches` and `my_branch` don't count.
-- On a development ticket the `type` label is a **conventional-commit** type
-  (`feat`, `fix`, …) and names the branch; branches use the **branch**
-  convention (`feature/`, `bugfix/`, `hotfix/`, `chore/`). `prefix()` maps
-  between them, matching the two lists in mrdoodles/conventional-validator, so
-  commits *and* branches validate. `AMD_TYPES` overrides the accepted types.
-- **One `parent` field, not epic/story.** Nesting gives both levels and any
-  depth, and nothing has to be decided up front. It stores an **id**, resolved
-  through `Board::find` when recorded. The child's template writes a `## Parent`
-  wikilink and `Task::add_child_link` appends the child to the parent's
-  `## Children` list, so the link is navigable from either end in an editor.
-  Tags stay free-form.
-- **`related` links tickets**, empty by default. It stores **ids**, not paths or
-  slugs, so a link survives a rename or a column move. Refs are resolved through
-  `Board::find` when recorded, so a typo fails then and there. The relation is
-  symmetric — `amd link` and `amd new --related` both write the backlink, and
-  `--one-way` opts out. `Task::add_related` rewrites the frontmatter through
-  `set_meta`, which inserts the key before the closing fence when a ticket
-  doesn't have it yet, so hand-written and older tickets can still be linked.
-- **Form order is title, ticket type, change, epic, story, tags** — the title
-  first because it's the one thing every ticket has and it names the file
-  whatever the labels turn out to be. It's validated with
-  `branch::validate_sluggable` (must make a filename); the branch-name check
-  happens once the type is known, which by then can only pass.
-- `amd start` moves the task and then switches to its branch. **Order matters**:
-  `git mv` is staged first so the rename travels with the switch and lands on
-  the task's branch. The branch comes from `--branch`, else the ticket's
-  `branch:` frontmatter (written at creation, so it's editable), else the
-  `type:` fallback. An admin ticket has none of those, so `amd start` says
-  "admin tickets don't use branches" and leaves the working tree alone.
+- **One ticket, one template.** There are no ticket types any more: `admin` and
+  `development` collapsed into fields you either fill in or don't.
+- **`branch-type` is what gives a ticket a branch**, and it's empty by default.
+  `branch-name` is derived from it and the title at creation and stored, so it
+  can be edited before work starts. No branch type means no branch, and
+  `amd start` says so and leaves the working tree alone.
+- The values are the **branch** convention (`feature`, `bugfix`, `hotfix`,
+  `release`, `chore`), matching mrdoodles/conventional-validator's branch check
+  directly — there's no longer a commit-type-to-branch-prefix mapping to keep in
+  step. `AMD_BRANCH_TYPES` overrides the list.
+- `owner` (not `assignee`) says who's doing it, empty by default: tickets are
+  created now and assigned later.
+- **Frontmatter keys are hyphenated, template variables are not** —
+  `branch-type: {{ branch_type | yaml }}`. Jinja would read `branch-type` as a
+  subtraction, so the variable has to be `branch_type`; the key is just text.
+- `Task` reads the new keys and **falls back to the old ones** (`type`,
+  `branch`, `assignee`), so boards written before this change still list, start
+  and filter correctly. There's no migration command; a ticket picks up the new
+  shape when it's rewritten.
+- Titles are validated against git's ref rules at creation — the title becomes
+  the branch, so a title with nothing sluggable in it is rejected up front.
+  `slugify` returns an empty string in that case; callers must reject it.
+- `amd start` takes the branch from `--branch`, else the ticket's `branch-name`,
+  else derives one from `branch-type` and the title. **Order matters**: `git mv`
+  is staged first so the rename travels with the switch.
 
 ## Board rendering (`src/render.rs`)
 
@@ -159,7 +144,7 @@ one implementation of the board.
   Non-interactively a missing value is an error with the usage line — the same
   contract the bash version had, and why the tool never hangs in CI.
 - Optional arguments drive it: `amd new` with no title runs the full form
-  (title, ticket type, change, epic, story, tags), `-i` re-asks for what was
+  (title, branch type, owner, parent, related, tags), `-i` re-asks for what was
   passed, and
   `start`/`done`/`back`/`show`/`edit` with no `<ref>` open a task picker
   scoped to the columns that command can act on.
@@ -183,8 +168,7 @@ one implementation of the board.
 
 ## Templates (the reason this is Rust)
 
-- Built-ins are compiled in via `include_str!` (`development`, `admin`,
-  `board-readme`) — the ticket types.
+- Built-ins are compiled in via `include_str!` (`ticket`, `board-readme`).
   Anything in `<board>/templates/<name>.md.jinja` overrides or adds to them;
   `amd templates eject <name>` writes an editable copy there.
 - The environment is deliberately configured: `UndefinedBehavior::Strict` (a
@@ -193,7 +177,7 @@ one implementation of the board.
 - Custom `yaml` filter quotes/escapes frontmatter values, so a title containing
   `"` can't corrupt the block. Use it for every frontmatter value.
 - `TaskContext` is the contract with templates (`id`, `number`, `title`, `slug`,
-  `type`, `assignee`, `parent`, `parent_link`, `related`, `branch`, `tags`, `created`, `timestamp`, `column`,
+  `branch_type`, `branch_name`, `owner`, `parent`, `parent_link`, `related`, `tags`, `created`, `timestamp`, `column`,
   `author`, `email`, `board`, `template`, `extra`). Adding a field is additive;
   renaming one breaks every user template — treat it as a public API.
 - Template errors are flattened by `render_error()` (message + line + cause
@@ -305,9 +289,9 @@ changes):
 - **v3** — command renamed `task` → **`amd`**; env `TASK_YES`/`TASKS_DIR` →
   `AMD_YES`/`AMD_DIR`.
 - **v4** — bash script → **Rust binary**; tasks rendered from MiniJinja
-  templates; `inquire` forms when a value is missing; `type`/`epic`/`story`
-  labels with branch creation on `amd start`; rich board output. Install
-  downloads a prebuilt binary instead of copying a script. The v3 CLI and board
+  templates; `inquire` forms when a value is missing; one flexible ticket whose
+  `branch-type` decides whether `amd start` makes a branch; a terminal UI.
+  Install downloads a prebuilt binary instead of copying a script. The v3 CLI and board
   layout still work; v3 task files simply have no labels, so `amd start` on one
   leaves the branch alone.
 

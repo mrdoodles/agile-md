@@ -259,9 +259,8 @@ fn guide_style(column: Column) -> Style {
 fn labels(node: &Node, root: bool) -> String {
     let task = &node.task;
     [
-        task.ticket()
-            .filter(|ticket| ticket != crate::templates::DEFAULT_TEMPLATE),
-        task.kind(),
+        task.branch_type(),
+        task.owner().map(|owner| format!("@{owner}")),
         // In the same column the tree already shows the parent; this marker is
         // for a child whose parent sits in another column.
         node.parent

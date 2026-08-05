@@ -236,6 +236,21 @@ impl Board {
         Ok(tags)
     }
 
+    /// Everyone who owns a ticket here, sorted — the suggestions when giving
+    /// one an owner.
+    pub fn owners(&self) -> Result<Vec<String>> {
+        let mut owners: Vec<String> = Vec::new();
+        for task in self.tasks()? {
+            if let Some(owner) = task.owner()
+                && !owners.contains(&owner)
+            {
+                owners.push(owner);
+            }
+        }
+        owners.sort();
+        Ok(owners)
+    }
+
     /// Every task's `NNN-slug`, the strings `amd new` completes a related ref
     /// against.
     pub fn stems(&self) -> Result<Vec<String>> {

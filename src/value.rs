@@ -13,11 +13,11 @@ use clap::{Arg, Command, Error};
 
 use agile_md::{branch, templates};
 
-/// The `--type` label: `admin`, or one of the board's change types.
+/// `--branch-type`: one of the board's branch types, or empty for no branch.
 #[derive(Clone, Copy, Debug)]
-pub struct ChangeType;
+pub struct BranchType;
 
-impl TypedValueParser for ChangeType {
+impl TypedValueParser for BranchType {
     type Value = String;
 
     fn parse_ref(
@@ -28,14 +28,14 @@ impl TypedValueParser for ChangeType {
     ) -> Result<String, Error> {
         let value = value.to_string_lossy().into_owned();
         // Our own message: it names the offending value and points at AMD_TYPES.
-        branch::validate_ticket_type(&value)
+        branch::validate_branch_type(&value)
             .map_err(|err| Error::raw(ErrorKind::InvalidValue, format!("{err}\n")))?;
         Ok(value)
     }
 
     fn possible_values(&self) -> Option<Box<dyn Iterator<Item = PossibleValue> + '_>> {
         Some(Box::new(
-            branch::ticket_types().into_iter().map(PossibleValue::new),
+            branch::branch_types().into_iter().map(PossibleValue::new),
         ))
     }
 }
@@ -58,11 +58,9 @@ impl TypedValueParser for TicketType {
     }
 
     fn possible_values(&self) -> Option<Box<dyn Iterator<Item = PossibleValue> + '_>> {
-        Some(Box::new(
-            templates::builtin_ticket_types()
-                .into_iter()
-                .map(PossibleValue::new),
-        ))
+        Some(Box::new(std::iter::once(PossibleValue::new(
+            templates::DEFAULT_TEMPLATE,
+        ))))
     }
 }
 
@@ -78,27 +76,33 @@ mod tests {
     }
 
     #[test]
-    fn types_offer_admin_and_the_conventional_list() {
-        let offered = values(&ChangeType);
-        assert!(offered.contains(&"admin".to_string()), "{offered:?}");
-        assert!(offered.contains(&"feat".to_string()), "{offered:?}");
-        assert!(offered.contains(&"revert".to_string()), "{offered:?}");
+    fn types_offer_the_conventional_branch_list() {
+        let offered = values(&BranchType);
+        assert!(offered.contains(&"feature".to_string()), "{offered:?}");
+        assert!(offered.contains(&"bugfix".to_string()), "{offered:?}");
+        assert!(offered.contains(&"chore".to_string()), "{offered:?}");
     }
 
     #[test]
-    fn change_types_are_validated_with_our_message() {
-        let err = ChangeType
-            .parse_ref(&Command::new("amd"), None, OsStr::new("development"))
+    fn branch_types_are_validated_with_our_message() {
+        let err = BranchType
+            .parse_ref(&Command::new("amd"), None, OsStr::new("feat"))
             .unwrap_err()
             .to_string();
-        assert!(err.contains("unknown type 'development'"), "{err}");
-        assert!(err.contains("AMD_TYPES"), "{err}");
+        assert!(err.contains("unknown branch type 'feat'"), "{err}");
+        assert!(err.contains("AMD_BRANCH_TYPES"), "{err}");
+        // Empty is a ticket with no branch, and always allowed.
+        assert!(
+            BranchType
+                .parse_ref(&Command::new("amd"), None, OsStr::new(""))
+                .is_ok()
+        );
     }
 
     #[test]
-    fn ticket_types_suggest_the_built_ins_but_accept_a_board_template() {
+    fn ticket_types_suggest_the_built_in_but_accept_a_board_template() {
         let offered = values(&TicketType);
-        assert_eq!(offered, ["development", "admin"]);
+        assert_eq!(offered, ["ticket"]);
         let parsed = TicketType
             .parse_ref(&Command::new("amd"), None, OsStr::new("spike"))
             .unwrap();

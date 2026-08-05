@@ -38,10 +38,10 @@ use crate::{branch, render};
 
 use settings::Settings;
 
-const HELP: &str = "j/k move  h/l column  [ ] shift  enter view  e edit  n new  p repo  a assignee  s settings  q quit";
+const HELP: &str = "j/k move  h/l column  [ ] shift  enter view  e edit  n new  p repo  a owner  s settings  q quit";
 const SETTINGS_BUTTON: &str = " settings ";
 /// The filter entry standing for "nobody has this one".
-const UNASSIGNED: &str = "(unassigned)";
+const UNOWNED: &str = "(nobody)";
 /// The filter entry standing for "all of them".
 const EVERYTHING: &str = "(all)";
 
@@ -75,10 +75,7 @@ enum Mode {
         body: String,
         scroll: u16,
     },
-    New {
-        title: String,
-        kind: usize,
-    },
+    New(NewForm),
     Settings {
         selected: usize,
         previous: ThemeName,
@@ -88,9 +85,71 @@ enum Mode {
         selected: usize,
     },
     /// Pick whose tickets to look at, or everyone's.
-    Assignees {
+    Owners {
         selected: usize,
     },
+}
+
+/// The new-ticket form: every field a ticket has, in one dialog, so what a
+/// ticket *is* is visible at the moment you make one.
+#[derive(Default)]
+struct NewForm {
+    title: String,
+    /// Index into `branch::choices()`, which starts at "(none)".
+    branch_type: usize,
+    owner: String,
+    parent: String,
+    related: String,
+    tags: String,
+    /// Which row has the cursor.
+    focus: usize,
+}
+
+/// The rows, in order. The branch type is a dropdown; the rest are text.
+const FIELDS: [&str; 6] = ["Title", "Branch type", "Owner", "Parent", "Related", "Tags"];
+const BRANCH_TYPE_ROW: usize = 1;
+
+impl NewForm {
+    fn field_mut(&mut self, row: usize) -> Option<&mut String> {
+        match row {
+            0 => Some(&mut self.title),
+            2 => Some(&mut self.owner),
+            3 => Some(&mut self.parent),
+            4 => Some(&mut self.related),
+            5 => Some(&mut self.tags),
+            _ => None,
+        }
+    }
+
+    fn value(&self, row: usize) -> String {
+        match row {
+            0 => self.title.clone(),
+            1 => branch::choices()
+                .get(self.branch_type)
+                .cloned()
+                .unwrap_or_default(),
+            2 => self.owner.clone(),
+            3 => self.parent.clone(),
+            4 => self.related.clone(),
+            5 => self.tags.clone(),
+            _ => String::new(),
+        }
+    }
+
+    fn cycle(&mut self, by: i32) {
+        let count = branch::choices().len().max(1) as i32;
+        self.branch_type = ((self.branch_type as i32 + by).rem_euclid(count)) as usize;
+    }
+
+    /// The branch this ticket would get, shown live so the effect of the
+    /// dropdown is visible before anything is created.
+    fn branch_preview(&self) -> String {
+        let kind = branch::normalise(&self.value(BRANCH_TYPE_ROW));
+        match branch::for_title(&kind, &self.title) {
+            Ok(name) if !name.is_empty() => name,
+            _ => "(no branch)".to_string(),
+        }
+    }
 }
 
 /// A ticket on the board, and which registered repository it belongs to —
@@ -112,9 +171,9 @@ struct App {
     /// Which repository is on show, or `None` for all of them.
     repo: Option<usize>,
     /// Whose tickets are on show, or `None` for everyone's.
-    assignee: Option<String>,
+    owner_filter: Option<String>,
     /// Everyone with a ticket anywhere in view, for the picker.
-    assignees: Vec<String>,
+    owners: Vec<String>,
     /// Flattened columns of cards.
     columns: Vec<Vec<Card>>,
     /// Selection per column, so switching columns keeps your place.
@@ -141,8 +200,8 @@ impl App {
             settings: Settings::load(),
             repos,
             repo: None,
-            assignee: None,
-            assignees: Vec::new(),
+            owner_filter: None,
+            owners: Vec::new(),
             columns: Vec::new(),
             selected: vec![0; Column::ALL.len()],
             column: 0,
@@ -171,7 +230,7 @@ impl App {
             None => (0..self.repos.len()).collect(),
         };
 
-        let mut assignees: Vec<String> = Vec::new();
+        let mut owners: Vec<String> = Vec::new();
         let mut columns: Vec<Vec<Card>> = Vec::new();
         for column in Column::ALL {
             let mut cards = Vec::new();
@@ -182,10 +241,10 @@ impl App {
                 let board = entry.board();
                 let nodes = render::column_forest(&board, column)?;
                 for (task, depth) in render::flatten(&nodes) {
-                    if let Some(who) = task.assignee()
-                        && !assignees.contains(&who)
+                    if let Some(who) = task.owner()
+                        && !owners.contains(&who)
                     {
-                        assignees.push(who);
+                        owners.push(who);
                     }
                     if !self.wanted(&task) {
                         continue;
@@ -199,8 +258,8 @@ impl App {
             }
             columns.push(cards);
         }
-        assignees.sort();
-        self.assignees = assignees;
+        owners.sort();
+        self.owners = owners;
         self.columns = columns;
         for (index, cards) in self.columns.iter().enumerate() {
             self.selected[index] = self.selected[index].min(cards.len().saturating_sub(1));
@@ -210,10 +269,10 @@ impl App {
 
     /// Does this ticket pass the assignee filter?
     fn wanted(&self, task: &Task) -> bool {
-        match &self.assignee {
+        match &self.owner_filter {
             None => true,
-            Some(who) if who == UNASSIGNED => task.assignee().is_none(),
-            Some(who) => task.assignee().as_deref() == Some(who.as_str()),
+            Some(who) if who == UNOWNED => task.owner().is_none(),
+            Some(who) => task.owner().as_deref() == Some(who.as_str()),
         }
     }
 
@@ -250,24 +309,28 @@ impl App {
 
     fn key(&mut self, key: KeyEvent, terminal: &mut DefaultTerminal) -> Result<()> {
         match &mut self.mode {
-            Mode::New { title, kind } => match key.code {
+            Mode::New(form) => match key.code {
                 KeyCode::Esc => self.mode = Mode::Board,
-                KeyCode::Enter => {
-                    let (title, kind) = (title.clone(), *kind);
-                    self.create(title, kind);
+                KeyCode::Enter => self.create(),
+                KeyCode::Tab | KeyCode::Down => {
+                    form.focus = (form.focus + 1) % FIELDS.len();
                 }
-                KeyCode::Tab | KeyCode::Down | KeyCode::Right => {
-                    *kind = (*kind + 1) % branch::ticket_types().len().max(1);
+                KeyCode::BackTab | KeyCode::Up => {
+                    form.focus = (form.focus + FIELDS.len() - 1) % FIELDS.len();
                 }
-                KeyCode::BackTab | KeyCode::Up | KeyCode::Left => {
-                    let count = branch::ticket_types().len().max(1);
-                    *kind = (*kind + count - 1) % count;
-                }
+                KeyCode::Right if form.focus == BRANCH_TYPE_ROW => form.cycle(1),
+                KeyCode::Left if form.focus == BRANCH_TYPE_ROW => form.cycle(-1),
+                KeyCode::Char(' ') if form.focus == BRANCH_TYPE_ROW => form.cycle(1),
                 KeyCode::Backspace => {
-                    title.pop();
+                    if let Some(field) = form.field_mut(form.focus) {
+                        field.pop();
+                    }
                 }
                 KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    title.push(ch);
+                    let focus = form.focus;
+                    if let Some(field) = form.field_mut(focus) {
+                        field.push(ch);
+                    }
                 }
                 _ => {}
             },
@@ -311,17 +374,17 @@ impl App {
                 }
                 _ => {}
             },
-            Mode::Assignees { selected } => match key.code {
+            Mode::Owners { selected } => match key.code {
                 KeyCode::Esc => self.mode = Mode::Board,
                 KeyCode::Enter => {
                     let chosen = *selected;
-                    self.choose_assignee(chosen);
+                    self.choose_owner(chosen);
                 }
                 KeyCode::Char('j') | KeyCode::Down => {
-                    *selected = (*selected + 1) % (self.assignees.len() + 2);
+                    *selected = (*selected + 1) % (self.owners.len() + 2);
                 }
                 KeyCode::Char('k') | KeyCode::Up => {
-                    let count = self.assignees.len() + 2;
+                    let count = self.owners.len() + 2;
                     *selected = (*selected + count - 1) % count;
                 }
                 _ => {}
@@ -347,7 +410,7 @@ impl App {
                 }),
                 KeyCode::Char('n') => self.open_new(),
                 KeyCode::Char('p') => self.open_repos(),
-                KeyCode::Char('a') => self.open_assignees(),
+                KeyCode::Char('a') => self.open_owners(),
                 KeyCode::Char('s') => self.open_settings(),
                 KeyCode::Char('e') => self.edit(terminal)?,
                 KeyCode::Enter => self.open_detail(),
@@ -369,8 +432,8 @@ impl App {
                     self.preview();
                 }
                 Mode::Repos { selected } => *selected = (*selected + 1) % (self.repos.len() + 1),
-                Mode::Assignees { selected } => {
-                    *selected = (*selected + 1) % (self.assignees.len() + 2);
+                Mode::Owners { selected } => {
+                    *selected = (*selected + 1) % (self.owners.len() + 2);
                 }
                 _ => self.move_selection(1),
             },
@@ -385,8 +448,8 @@ impl App {
                     let count = self.repos.len() + 1;
                     *selected = (*selected + count - 1) % count;
                 }
-                Mode::Assignees { selected } => {
-                    let count = self.assignees.len() + 2;
+                Mode::Owners { selected } => {
+                    let count = self.owners.len() + 2;
                     *selected = (*selected + count - 1) % count;
                 }
                 _ => self.move_selection(-1),
@@ -410,10 +473,15 @@ impl App {
                     self.preview();
                 }
             }
-            // Clicking the type line cycles it, the way a dropdown would.
-            Mode::New { kind, .. } => {
-                if self.dialog_area.contains(at) {
-                    *kind = (*kind + 1) % branch::ticket_types().len().max(1);
+            // Clicking a row focuses it; clicking the dropdown cycles it.
+            Mode::New(form) => {
+                if let Some(row) = row_in(self.dialog_area, at)
+                    && row < FIELDS.len()
+                {
+                    if form.focus == row && row == BRANCH_TYPE_ROW {
+                        form.cycle(1);
+                    }
+                    form.focus = row;
                 }
             }
             Mode::Repos { .. } => {
@@ -423,11 +491,11 @@ impl App {
                     self.choose_repo(row);
                 }
             }
-            Mode::Assignees { .. } => {
+            Mode::Owners { .. } => {
                 if let Some(row) = row_in(self.dialog_area, at)
-                    && row < self.assignees.len() + 2
+                    && row < self.owners.len() + 2
                 {
-                    self.choose_assignee(row);
+                    self.choose_owner(row);
                 }
             }
             Mode::Detail { .. } => {}
@@ -463,13 +531,8 @@ impl App {
     }
 
     fn open_new(&mut self) {
-        self.mode = Mode::New {
-            title: String::new(),
-            kind: branch::ticket_types()
-                .iter()
-                .position(|kind| *kind == branch::default_type())
-                .unwrap_or(0),
-        };
+        // Starts on "(none)": a ticket only gets a branch when you say so.
+        self.mode = Mode::New(NewForm::default());
     }
 
     /// The repository picker: "all" first, then each registered board.
@@ -492,29 +555,29 @@ impl App {
         });
     }
 
-    /// The assignee picker: everyone, then unassigned, then each name in view.
-    fn open_assignees(&mut self) {
-        let selected = match &self.assignee {
+    /// The owner picker: everyone, then unowned, then each name in view.
+    fn open_owners(&mut self) {
+        let selected = match &self.owner_filter {
             None => 0,
-            Some(who) if who == UNASSIGNED => 1,
+            Some(who) if who == UNOWNED => 1,
             Some(who) => self
-                .assignees
+                .owners
                 .iter()
                 .position(|name| name == who)
                 .map(|index| index + 2)
                 .unwrap_or(0),
         };
-        self.mode = Mode::Assignees { selected };
+        self.mode = Mode::Owners { selected };
     }
 
-    fn choose_assignee(&mut self, row: usize) {
-        self.assignee = match row {
+    fn choose_owner(&mut self, row: usize) {
+        self.owner_filter = match row {
             0 => None,
-            1 => Some(UNASSIGNED.to_string()),
-            other => self.assignees.get(other - 2).cloned(),
+            1 => Some(UNOWNED.to_string()),
+            other => self.owners.get(other - 2).cloned(),
         };
         let label = self
-            .assignee
+            .owner_filter
             .clone()
             .unwrap_or_else(|| "everyone".to_string());
         self.mode = Mode::Board;
@@ -617,24 +680,22 @@ impl App {
         Ok(())
     }
 
-    fn create(&mut self, title: String, kind: usize) {
-        let chosen = branch::ticket_types()
-            .get(kind)
-            .cloned()
-            .unwrap_or_else(branch::default_type);
+    fn create(&mut self) {
+        let Mode::New(form) = &self.mode else {
+            return;
+        };
+        let ticket = NewTicket {
+            title: form.title.trim().to_string(),
+            template: templates::DEFAULT_TEMPLATE.to_string(),
+            branch_type: branch::normalise(&form.value(BRANCH_TYPE_ROW)),
+            owner: form.owner.trim().to_string(),
+            parent: Some(form.parent.trim().to_string()).filter(|it| !it.is_empty()),
+            related: split(&form.related),
+            tags: split(&form.tags),
+            extra: Default::default(),
+        };
         self.attempt(move |app| {
-            // One answer, two settings: the type picks the template as well.
-            let (template, kind) = branch::resolve(&chosen);
-            let draft = Draft::prepare(
-                &app.board,
-                &app.templates,
-                NewTicket {
-                    title,
-                    template,
-                    kind,
-                    ..Default::default()
-                },
-            )?;
+            let draft = Draft::prepare(&app.board, &app.templates, ticket)?;
             let created = draft.write(&app.board, None)?;
             app.reload()?;
             app.mode = Mode::Board;
@@ -674,10 +735,7 @@ impl App {
                 let (body, scroll) = (body.clone(), *scroll);
                 self.draw_detail(frame, &body, scroll, &palette);
             }
-            Mode::New { title, kind } => {
-                let (title, kind) = (title.clone(), *kind);
-                self.draw_new(frame, &title, kind, &palette);
-            }
+            Mode::New(_) => self.draw_new(frame, &palette),
             Mode::Settings { selected, .. } => {
                 let selected = *selected;
                 self.draw_settings(frame, selected, &palette);
@@ -694,11 +752,11 @@ impl App {
                     &palette,
                 );
             }
-            Mode::Assignees { selected } => {
+            Mode::Owners { selected } => {
                 let selected = *selected;
-                let mut choices = vec![EVERYTHING.to_string(), UNASSIGNED.to_string()];
-                choices.extend(self.assignees.clone());
-                self.draw_picker(frame, " Assignee ", selected, choices, &palette);
+                let mut choices = vec![EVERYTHING.to_string(), UNOWNED.to_string()];
+                choices.extend(self.owners.clone());
+                self.draw_picker(frame, " Owner ", selected, choices, &palette);
             }
             Mode::Board => self.dialog_area = Rect::ZERO,
         }
@@ -716,7 +774,7 @@ impl App {
         } else if self.repos.len() > 1 {
             filters.push(format!("{} repos", self.repos.len()));
         }
-        if let Some(who) = &self.assignee {
+        if let Some(who) = &self.owner_filter {
             filters.push(format!("@{who}"));
         }
         let filters = match filters.is_empty() {
@@ -782,7 +840,7 @@ impl App {
                             Style::new().fg(palette.secondary),
                         ));
                     }
-                    if let Some(who) = task.assignee() {
+                    if let Some(who) = task.owner() {
                         spans.push(Span::styled(
                             format!("  @{who}"),
                             Style::new().fg(palette.accent),
@@ -842,40 +900,62 @@ impl App {
         );
     }
 
-    fn draw_new(&mut self, frame: &mut Frame, title: &str, kind: usize, palette: &ThemePalette) {
-        let area = centred(frame.area(), 60, 20);
+    /// Every field a ticket has, one row each, with the branch it would get
+    /// shown underneath.
+    fn draw_new(&mut self, frame: &mut Frame, palette: &ThemePalette) {
+        let area = centred(frame.area(), 64, 45);
         self.dialog_area = area;
         frame.render_widget(Clear, area);
-        let types = branch::ticket_types();
-        let chosen = types.get(kind).cloned().unwrap_or_default();
-        let text = vec![
-            Line::from(vec![
-                Span::styled("Title: ", Style::new().fg(palette.muted)),
-                Span::styled(title.to_string(), Style::new().fg(palette.fg)),
-                Span::styled("▏", Style::new().fg(palette.accent)),
-            ]),
-            Line::from(vec![
-                Span::styled("Type:  ", Style::new().fg(palette.muted)),
-                Span::styled(
-                    format!(" {chosen} ▾ "),
-                    Style::new().fg(palette.bg).bg(palette.accent),
-                ),
-                Span::styled("  tab or click to change", Style::new().fg(palette.muted)),
-            ]),
-        ];
+        let Mode::New(form) = &self.mode else {
+            return;
+        };
+
+        let mut lines: Vec<Line> = Vec::new();
+        for (row, label) in FIELDS.iter().enumerate() {
+            let focused = row == form.focus;
+            let value = form.value(row);
+            let value_style = if row == BRANCH_TYPE_ROW {
+                Style::new().fg(palette.bg).bg(palette.accent)
+            } else {
+                Style::new().fg(palette.fg)
+            };
+            let mut spans = vec![Span::styled(
+                format!("{label:<12} "),
+                Style::new().fg(if focused {
+                    palette.accent
+                } else {
+                    palette.muted
+                }),
+            )];
+            if row == BRANCH_TYPE_ROW {
+                spans.push(Span::styled(format!(" {value} ▾ "), value_style));
+            } else {
+                spans.push(Span::styled(value, value_style));
+            }
+            if focused {
+                spans.push(Span::styled("▏", Style::new().fg(palette.accent)));
+            }
+            lines.push(Line::from(spans));
+        }
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![
+            Span::styled("Branch       ", Style::new().fg(palette.muted)),
+            Span::styled(form.branch_preview(), Style::new().fg(palette.secondary)),
+        ]));
+
         frame.render_widget(
-            Paragraph::new(text)
+            Paragraph::new(lines)
                 .style(Style::new().bg(palette.bg))
                 .block(dialog(
                     palette,
                     " New ticket ",
-                    " enter create  esc cancel ",
+                    " tab field  ←/→ change  enter create  esc cancel ",
                 )),
             area,
         );
     }
 
-    /// One dialog shape for the repository and assignee pickers.
+    /// One dialog shape for the repository and owner pickers.
     fn draw_picker(
         &mut self,
         frame: &mut Frame,
@@ -942,6 +1022,14 @@ fn dialog<'a>(palette: &ThemePalette, title: &'a str, footer: &'a str) -> Block<
         .title_bottom(Span::styled(footer, Style::new().fg(palette.muted)))
 }
 
+/// A comma-separated answer, as the list it stands for.
+fn split(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .map(|item| item.trim().to_string())
+        .filter(|item| !item.is_empty())
+        .collect()
+}
+
 /// Which list row a click landed on, allowing for the widget's border.
 fn row_in(area: Rect, at: Position) -> Option<usize> {
     if !area.contains(at) {
@@ -951,17 +1039,9 @@ fn row_in(area: Rect, at: Position) -> Option<usize> {
     (at.y >= first).then(|| (at.y - first) as usize)
 }
 
-/// The ticket's type, as shown beside its title.
+/// The ticket's branch type, as shown beside its title.
 fn labels(task: &Task) -> String {
-    [
-        task.ticket()
-            .filter(|ticket| ticket != templates::DEFAULT_TEMPLATE),
-        task.kind(),
-    ]
-    .into_iter()
-    .flatten()
-    .collect::<Vec<String>>()
-    .join(" ")
+    task.branch_type().unwrap_or_default()
 }
 
 /// Columns read left-to-right as work progresses; the palette supplies the
@@ -1018,9 +1098,46 @@ mod tests {
     }
 
     #[test]
-    fn the_type_list_leads_with_admin_and_defaults_to_a_change_type() {
-        let types = branch::ticket_types();
-        assert_eq!(types.first().map(String::as_str), Some("admin"));
-        assert!(types.contains(&branch::default_type()));
+    fn the_branch_type_dropdown_starts_at_no_branch() {
+        let form = NewForm::default();
+        assert_eq!(form.value(BRANCH_TYPE_ROW), branch::NONE);
+        assert_eq!(form.branch_preview(), "(no branch)");
+    }
+
+    #[test]
+    fn the_form_carries_every_ticket_field() {
+        assert_eq!(
+            FIELDS,
+            ["Title", "Branch type", "Owner", "Parent", "Related", "Tags"]
+        );
+    }
+
+    #[test]
+    fn choosing_a_branch_type_shows_the_branch_it_would_make() {
+        let mut form = NewForm {
+            title: "Ticket fields".to_string(),
+            ..Default::default()
+        };
+        // (none) -> feature -> bugfix -> hotfix -> release -> chore
+        for _ in 0..5 {
+            form.cycle(1);
+        }
+        assert_eq!(form.value(BRANCH_TYPE_ROW), "chore");
+        assert_eq!(form.branch_preview(), "chore/ticket-fields");
+        // Back round to the start: no branch again.
+        form.cycle(1);
+        assert_eq!(form.branch_preview(), "(no branch)");
+    }
+
+    #[test]
+    fn typing_goes_to_the_focused_field() {
+        let mut form = NewForm::default();
+        form.field_mut(0).unwrap().push_str("Title here");
+        form.focus = 2;
+        form.field_mut(form.focus).unwrap().push_str("tim");
+        assert_eq!(form.title, "Title here");
+        assert_eq!(form.owner, "tim");
+        // The dropdown row has no text to type into.
+        assert!(form.field_mut(BRANCH_TYPE_ROW).is_none());
     }
 }

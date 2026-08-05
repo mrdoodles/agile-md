@@ -68,29 +68,30 @@ impl Task {
             .unwrap_or_else(|| self.stem.clone())
     }
 
-    /// Who the ticket is assigned to, if anyone.
-    pub fn assignee(&self) -> Option<String> {
-        self.meta("assignee").filter(|who| !who.is_empty())
+    /// Who owns the ticket, if anyone. Falls back to the old `assignee` key so
+    /// tickets written before the rename still read.
+    pub fn owner(&self) -> Option<String> {
+        self.meta("owner")
+            .or_else(|| self.meta("assignee"))
+            .filter(|who| !who.is_empty())
     }
 
-    /// Assign the ticket, or clear it with an empty name.
+    /// Give the ticket an owner, or clear it with an empty name.
     pub fn assign(&self, who: &str) -> Result<()> {
         let text = fs::read_to_string(&self.path)
             .with_context(|| format!("reading {}", self.path.display()))?;
         let quoted = format!("{:?}", who);
-        let updated = set_meta(&text, "assignee", &quoted)
+        let updated = set_meta(&text, "owner", &quoted)
             .with_context(|| format!("updating {}", self.path.display()))?;
         fs::write(&self.path, updated).with_context(|| format!("writing {}", self.path.display()))
     }
 
-    /// The `type` label, if the task carries one.
-    pub fn kind(&self) -> Option<String> {
-        self.meta("type").filter(|kind| !kind.is_empty())
-    }
-
-    /// The ticket type (`development`, `admin`), if the task records one.
-    pub fn ticket(&self) -> Option<String> {
-        self.meta("ticket").filter(|ticket| !ticket.is_empty())
+    /// The branch type, if the ticket carries one. Falls back to the old
+    /// `type` key.
+    pub fn branch_type(&self) -> Option<String> {
+        self.meta("branch-type")
+            .or_else(|| self.meta("type"))
+            .filter(|kind| !kind.is_empty())
     }
 
     /// The id of this ticket's parent, if it has one. Ids rather than paths,
@@ -155,10 +156,13 @@ impl Task {
         Ok(true)
     }
 
-    /// The branch this task should be worked on, as recorded when it was
-    /// created. Editing the ticket's `branch:` changes where `amd start` goes.
+    /// The branch this ticket is worked on, as recorded when it was created.
+    /// Editing `branch-name` changes where `amd start` goes. Falls back to the
+    /// old `branch` key.
     pub fn branch(&self) -> Option<String> {
-        self.meta("branch").filter(|branch| !branch.is_empty())
+        self.meta("branch-name")
+            .or_else(|| self.meta("branch"))
+            .filter(|branch| !branch.is_empty())
     }
 }
 

@@ -30,10 +30,10 @@ pub struct NewTicket {
     pub title: String,
     /// Ticket type — the template name (`development`, `admin`, …).
     pub template: String,
-    /// Change type (`feat`, `fix`, …); ignored by templates that don't use it.
-    pub kind: String,
-    /// Who to assign it to; empty for nobody.
-    pub assignee: String,
+    /// Branch type (`feature`, `bugfix`, …); empty for a ticket with no branch.
+    pub branch_type: String,
+    /// Who owns it; empty for nobody, and assignable later.
+    pub owner: String,
     /// A ref (id or slug) for the ticket this one sits under.
     pub parent: Option<String>,
     /// Refs for the tickets this one relates to.
@@ -73,26 +73,12 @@ impl Draft {
     pub fn prepare(board: &Board, templates: &Templates, ticket: NewTicket) -> Result<Draft> {
         branch::validate_sluggable(&ticket.title)?;
 
-        // Whether this ticket gets a branch is the template's call, and a
-        // branch needs a change type to name it.
-        let branched = templates.branches(&ticket.template)?;
-        let wants_type = branched || templates.uses(&ticket.template, "type")?;
-        let kind = if wants_type {
-            let kind = if ticket.kind.is_empty() {
-                branch::default_type()
-            } else {
-                ticket.kind.clone()
-            };
-            branch::validate_type(&kind)?;
-            kind
-        } else {
-            String::new()
-        };
-        let branch_name = if branched {
-            branch::for_title(&kind, &ticket.title)?
-        } else {
-            String::new()
-        };
+        // A branch type is optional: with one, the ticket is worked on a branch
+        // named from it and the title; without, there's simply nothing to check
+        // out. That single field is what `admin` and `development` used to be.
+        let branch_type = branch::normalise(&ticket.branch_type);
+        branch::validate_branch_type(&branch_type)?;
+        let branch_name = branch::for_title(&branch_type, &ticket.title)?;
 
         // Links are stored as ids and resolved now: a typo is an error here
         // rather than a dangling link discovered later.
@@ -140,7 +126,8 @@ impl Draft {
             number,
             title: ticket.title,
             slug: slug.clone(),
-            kind,
+            branch_type: branch_type.clone(),
+            branch_name: branch_name.clone(),
             parent: parent_task
                 .as_ref()
                 .map(|task| task.id_display())
@@ -149,9 +136,8 @@ impl Draft {
                 .as_ref()
                 .map(|task| task.stem.clone())
                 .unwrap_or_default(),
-            assignee: ticket.assignee,
+            owner: ticket.owner,
             related: related.clone(),
-            branch: branch_name.clone(),
             tags: ticket.tags,
             created,
             timestamp,
@@ -251,7 +237,7 @@ mod tests {
         NewTicket {
             title: title.to_string(),
             template: crate::templates::DEFAULT_TEMPLATE.to_string(),
-            kind: "feat".to_string(),
+            branch_type: "feature".to_string(),
             ..Default::default()
         }
     }
@@ -334,13 +320,26 @@ mod tests {
     }
 
     #[test]
-    fn an_admin_ticket_gets_no_branch() {
+    fn a_ticket_without_a_branch_type_gets_no_branch() {
         let (_dir, board) = board();
         let templates = Templates::load(&board).unwrap();
         let mut wanted = ticket("Renew the certificates");
-        wanted.template = "admin".to_string();
+        wanted.branch_type = String::new();
         let draft = Draft::prepare(&board, &templates, wanted).unwrap();
         assert_eq!(draft.branch, "");
-        assert!(!draft.body.contains("branch:"), "{}", draft.body);
+        assert!(draft.body.contains("branch-name: \"\""), "{}", draft.body);
+    }
+
+    #[test]
+    fn an_unknown_branch_type_is_refused_before_anything_is_written() {
+        let (_dir, board) = board();
+        let templates = Templates::load(&board).unwrap();
+        let mut wanted = ticket("Add login");
+        wanted.branch_type = "feat".to_string();
+        let err = Draft::prepare(&board, &templates, wanted)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("unknown branch type 'feat'"), "{err}");
+        assert!(board.tasks().unwrap().is_empty());
     }
 }

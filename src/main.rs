@@ -129,7 +129,7 @@ enum Cmd {
         #[arg(value_name = "REF")]
         task: Option<String>,
     },
-    /// Assign a ticket, or clear it with no name
+    /// Give a ticket an owner, or clear it with no name
     Assign {
         #[arg(value_name = "REF")]
         task: String,
@@ -172,15 +172,22 @@ struct NewArgs {
     /// Task title; omit it in a terminal to fill in the form
     #[arg(value_name = "TITLE")]
     title: Option<String>,
-    /// Change type on a development ticket: feat, fix, docs, chore, …
-    #[arg(long, value_name = "TYPE", value_parser = value::ChangeType)]
-    r#type: Option<String>,
+    /// Branch type: feature, bugfix, hotfix, release, chore. Leave it out for
+    /// a ticket with no branch
+    #[arg(
+        long = "branch-type",
+        alias = "type",
+        value_name = "TYPE",
+        value_parser = value::BranchType,
+    )]
+    branch_type: Option<String>,
     /// The ticket this one sits under (an epic, a story, anything)
     #[arg(short = 'p', long, value_name = "REF")]
     parent: Option<String>,
-    /// Who to assign it to (defaults to nobody; --assignee @me is you)
-    #[arg(short = 'a', long, value_name = "WHO")]
-    assignee: Option<String>,
+    /// Who owns it (nobody by default; `@me` is you). Tickets can be created
+    /// now and given an owner later
+    #[arg(short = 'o', long, alias = "assignee", value_name = "WHO")]
+    owner: Option<String>,
     /// Another ticket this one depends on or relates to (repeatable)
     #[arg(short = 'r', long = "related", value_name = "REF")]
     related: Vec<String>,
@@ -341,7 +348,7 @@ fn run() -> Result<()> {
         Cmd::Tui => cmd_tui(board),
         Cmd::Assign { task, who } => {
             let task = resolve(&board, Some(task), "assign", &Column::ALL)?;
-            let who = resolve_assignee(who.as_deref());
+            let who = resolve_owner(who.as_deref());
             task.assign(&who)?;
             match who.is_empty() {
                 true => println!("{} unassigned", task.id_display()),
@@ -365,16 +372,18 @@ fn cmd_start(
     no_branch: bool,
 ) -> Result<()> {
     // Read everything off the ticket before the move — afterwards the path is
-    // stale. An admin ticket records no branch and no type, so there is
+    // stale. A ticket with no branch type has nothing to check out, so there's
     // nothing to switch to unless --branch says otherwise.
-    let ticket = task.ticket();
     let wanted = match override_branch {
         Some(name) => Some(name),
         None => match task.branch() {
             Some(name) => Some(name),
-            // Older tasks (and custom templates) may carry only a type label.
-            None => match task.kind() {
-                Some(kind) => Some(branch::for_title(&kind, &task.title())?),
+            // A ticket edited by hand may name a branch type but no branch.
+            None => match task.branch_type() {
+                Some(kind) => {
+                    let name = branch::for_title(&kind, &task.title())?;
+                    (!name.is_empty()).then_some(name)
+                }
                 None => None,
             },
         },
@@ -386,10 +395,7 @@ fn cmd_start(
         return Ok(());
     }
     let Some(name) = wanted else {
-        match ticket {
-            Some(ticket) => eprintln!("amd: {ticket} tickets don't use branches"),
-            None => eprintln!("amd: no type or branch on this task; left the branch alone"),
-        }
+        eprintln!("amd: no branch type on this ticket; left the branch alone");
         return Ok(());
     };
     branch::validate(&name)?;
@@ -497,7 +503,7 @@ fn cmd_repos(command: ReposCmd) -> Result<()> {
 }
 
 /// `@me` is whoever git says you are — the name that ends up in the commits.
-fn resolve_assignee(who: Option<&str>) -> String {
+fn resolve_owner(who: Option<&str>) -> String {
     match who {
         Some("@me") => git::config("user.name").unwrap_or_else(|| "me".to_string()),
         Some(who) => who.trim().to_string(),
@@ -570,22 +576,18 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
     };
     branch::validate_sluggable(&title)?;
 
-    // One question, not two: a ticket's type is `admin` or the change it
-    // makes, and that single answer picks the template as well.
-    let chosen = match args.r#type {
-        Some(chosen) => chosen,
-        None if full_form => {
-            form::select("Type:", branch::ticket_types(), &branch::default_type())?
-        }
-        None => branch::default_type(),
+    // A branch type is optional, and empty by default: a ticket only gets a
+    // branch when you say what kind of work it is.
+    let branch_type = match args.branch_type {
+        Some(chosen) => branch::normalise(&chosen),
+        None if full_form => branch::normalise(&form::select(
+            "Branch type:",
+            branch::choices(),
+            &branch::NONE.to_string(),
+        )?),
+        None => String::new(),
     };
-    let (derived, kind) = branch::resolve(&chosen);
-    // An explicit --template still wins, for a board with templates of its own.
-    let template = if args.template == DEFAULT_TEMPLATE {
-        derived
-    } else {
-        args.template.clone()
-    };
+    let template = args.template.clone();
 
     // One parent instead of epic and story: nesting gives both, and any depth
     // past them.
@@ -601,6 +603,17 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
             (!answer.is_empty()).then_some(answer)
         }
         None => None,
+    };
+
+    let owner = match args.owner {
+        Some(owner) => resolve_owner(Some(&owner)),
+        None if full_form => resolve_owner(Some(&form::label(
+            "Owner:",
+            "",
+            board.owners()?,
+            "who's doing it; blank for nobody, @me for you",
+        )?)),
+        None => String::new(),
     };
 
     let related = if full_form && args.related.is_empty() {
@@ -639,9 +652,9 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
         &templates,
         NewTicket {
             title,
-            assignee: resolve_assignee(args.assignee.as_deref()),
+            owner,
             template,
-            kind,
+            branch_type,
             parent,
             related,
             tags,

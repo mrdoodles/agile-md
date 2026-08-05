@@ -23,8 +23,9 @@ use time::macros::format_description;
 
 use crate::board::{Board, Column};
 
-/// Ticket type used by `amd new` when one isn't chosen.
-pub const DEFAULT_TEMPLATE: &str = "development";
+/// The one built-in ticket. A board can add its own templates, but there is no
+/// longer a type of ticket: what varies is the fields you fill in.
+pub const DEFAULT_TEMPLATE: &str = "ticket";
 
 /// Suffix for template files in `<board>/templates/`.
 pub const TEMPLATE_SUFFIX: &str = ".md.jinja";
@@ -33,11 +34,7 @@ pub const TEMPLATE_SUFFIX: &str = ".md.jinja";
 const BOARD_README: &str = "board-readme";
 
 const BUILTINS: &[(&str, &str)] = &[
-    (
-        "development",
-        include_str!("../templates/development.md.jinja"),
-    ),
-    ("admin", include_str!("../templates/admin.md.jinja")),
+    ("ticket", include_str!("../templates/ticket.md.jinja")),
     (
         BOARD_README,
         include_str!("../templates/board-readme.md.jinja"),
@@ -69,11 +66,15 @@ pub struct TaskContext {
     pub number: u32,
     pub title: String,
     pub slug: String,
-    /// Type label — also the branch prefix (`feature`, `bugfix`, …).
-    #[serde(rename = "type")]
-    pub kind: String,
-    /// Who the ticket is assigned to, or an empty string.
-    pub assignee: String,
+    /// Branch type (`feature`, `bugfix`, …), or empty for a ticket with no
+    /// branch.
+    pub branch_type: String,
+    /// The branch this ticket is worked on, made from the branch type and the
+    /// title. Empty when there's no branch type.
+    pub branch_name: String,
+    /// Who owns the ticket, or an empty string — tickets can be created now
+    /// and given an owner later.
+    pub owner: String,
     /// Id of this ticket's parent, or an empty string. One field instead of
     /// epic/story: nesting gives you those, and any depth beyond them.
     pub parent: String,
@@ -81,9 +82,6 @@ pub struct TaskContext {
     pub parent_link: String,
     /// Ids of the tickets this one depends on or relates to. Empty by default.
     pub related: Vec<String>,
-    /// Branch this task will get on `amd start`, e.g. `feature/add-login`.
-    /// Empty on ticket types that don't use branches.
-    pub branch: String,
     pub tags: Vec<String>,
     /// Local date, `YYYY-MM-DD`.
     pub created: String,
@@ -183,21 +181,6 @@ impl Templates {
         Ok(required_extras(&self.source_text(name)?))
     }
 
-    /// Does this ticket type record a branch? That's what makes it development
-    /// work: an admin template never mentions `branch`, so no branch is
-    /// computed for it and `amd start` leaves the working tree where it is.
-    /// A custom template opts in simply by using the variable.
-    pub fn branches(&self, name: &str) -> Result<bool> {
-        self.uses(name, "branch")
-    }
-
-    /// Does this ticket type use `variable`? Templates drive the form: a
-    /// template that shows a change type is asked for one even when it records
-    /// no branch.
-    pub fn uses(&self, name: &str, variable: &str) -> Result<bool> {
-        Ok(references(&self.source_text(name)?, variable))
-    }
-
     /// The template's text, from the board file or the binary.
     pub fn source_text(&self, name: &str) -> Result<String> {
         match self.sources.get(name) {
@@ -229,7 +212,7 @@ pub fn render_board_readme(board: &Board) -> Result<String> {
         context! {
             board => board.name(),
             columns => columns,
-            types => crate::branch::types(),
+            types => crate::branch::branch_types(),
             created => today().0,
         },
     )
@@ -313,15 +296,6 @@ pub fn field_label(key: &str) -> String {
         Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
         None => words,
     }
-}
-
-/// The built-in ticket types, in the order they're offered.
-pub fn builtin_ticket_types() -> Vec<String> {
-    BUILTINS
-        .iter()
-        .map(|(name, _)| (*name).to_string())
-        .filter(|name| name != BOARD_README)
-        .collect()
 }
 
 /// The source of a built-in template, if `name` is one.
@@ -409,12 +383,12 @@ mod tests {
             number: 1,
             title: "First task".to_string(),
             slug: "first-task".to_string(),
-            kind: "feat".to_string(),
-            assignee: "tim".to_string(),
+            branch_type: "bugfix".to_string(),
+            branch_name: "bugfix/first-task".to_string(),
+            owner: "tim".to_string(),
             parent: "002".to_string(),
             parent_link: "002-checkout".to_string(),
             related: vec!["003".to_string()],
-            branch: "feature/first-task".to_string(),
             tags: vec!["x".to_string(), "y".to_string()],
             created: "2026-08-03".to_string(),
             timestamp: "2026-08-03T09:00:00+01:00".to_string(),
@@ -422,34 +396,33 @@ mod tests {
             author: "t".to_string(),
             email: "t@t.co".to_string(),
             board: "tasks".to_string(),
-            template: "development".to_string(),
+            template: "ticket".to_string(),
             extra: BTreeMap::new(),
         }
     }
 
     #[test]
-    fn development_template_renders_the_documented_frontmatter() {
+    fn the_ticket_template_renders_the_documented_frontmatter() {
         let rendered = Templates::builtin()
             .unwrap()
-            .render("development", ctx())
+            .render("ticket", ctx())
             .unwrap();
         assert!(rendered.starts_with("---\n"), "{rendered}");
         assert!(rendered.contains("\nid: \"001\"\n"), "{rendered}");
         assert!(rendered.contains("\ntitle: \"First task\"\n"), "{rendered}");
-        assert!(rendered.contains("\ntype: \"feat\"\n"), "{rendered}");
-        assert!(rendered.contains("\nassignee: \"tim\"\n"), "{rendered}");
+        assert!(
+            rendered.contains("\nbranch-type: \"bugfix\"\n"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("\nbranch-name: \"bugfix/first-task\"\n"),
+            "{rendered}"
+        );
+        assert!(rendered.contains("\nowner: \"tim\"\n"), "{rendered}");
         assert!(rendered.contains("\nparent: \"002\"\n"), "{rendered}");
         assert!(rendered.contains("[[002-checkout]]"), "{rendered}");
-        assert!(
-            rendered.contains("\nbranch: \"feature/first-task\"\n"),
-            "{rendered}"
-        );
         assert!(rendered.contains("\ntags: [x,y]\n"), "{rendered}");
         assert!(rendered.contains("\nrelated: [003]\n"), "{rendered}");
-        assert!(
-            rendered.contains("\nticket: \"development\"\n"),
-            "{rendered}"
-        );
         assert!(rendered.contains("## Acceptance criteria"), "{rendered}");
         assert!(rendered.ends_with('\n'), "{rendered}");
     }
@@ -471,10 +444,7 @@ mod tests {
     fn a_title_with_quotes_cannot_break_the_frontmatter() {
         let mut c = ctx();
         c.title = r#"Fix the "quoted" \ thing"#.to_string();
-        let rendered = Templates::builtin()
-            .unwrap()
-            .render("development", c)
-            .unwrap();
+        let rendered = Templates::builtin().unwrap().render("ticket", c).unwrap();
         assert!(
             rendered.contains(r#"title: "Fix the \"quoted\" \\ thing""#),
             "{rendered}"
@@ -554,32 +524,8 @@ mod tests {
     fn task_templates_exclude_the_board_readme() {
         let templates = Templates::builtin().unwrap();
         let names = templates.task_templates();
-        assert!(names.contains(&"development".to_string()));
-        assert!(names.contains(&"admin".to_string()));
+        assert!(names.contains(&"ticket".to_string()));
         assert!(!names.contains(&BOARD_README.to_string()));
-    }
-
-    #[test]
-    fn only_the_development_ticket_records_a_branch() {
-        let templates = Templates::builtin().unwrap();
-        assert!(templates.branches("development").unwrap());
-        assert!(!templates.branches("admin").unwrap());
-    }
-
-    #[test]
-    fn a_template_can_want_a_change_type_without_a_branch() {
-        let mut templates = Templates::builtin().unwrap();
-        templates
-            .env
-            .add_template_owned("note".to_string(), "type: {{ type }}".to_string())
-            .unwrap();
-        templates
-            .sources
-            .insert("note".to_string(), Source::Board("note.md.jinja".into()));
-        // source_text reads the board file, which doesn't exist here, so check
-        // the scan directly instead.
-        assert!(references("type: {{ type }}", "type"));
-        assert!(!references("type: {{ type }}", "branch"));
     }
 
     #[test]
