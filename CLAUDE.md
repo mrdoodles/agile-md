@@ -135,7 +135,8 @@ one implementation of the board.
   clicking one opens the ticket. They are deliberately not in the plain path:
   escape sequences have no business in a pipe. Note this is why the board moved
   off `richrs::Table` — a table measures cell widths and would count the escape
-  bytes, misaligning every border.
+  bytes, misaligning every border. (`richrs` draws the one-shot `amd board`
+  printout only; the interactive board is ratatui.)
 - A rendering failure falls back to plain output rather than erroring: never
   let cosmetics stop someone seeing the board.
 
@@ -193,6 +194,14 @@ one implementation of the board.
   tickets: the markdown is the source of truth, it changes under you on every
   checkout and pull, and an index would be stale the moment it was written.
   Reading a board is a directory listing and a few small files.
+- **The list fills itself**: `registry::remember()` runs whenever a command
+  resolves a board, writing only the first time a repository is seen, so the
+  boards you work on accumulate across sessions. Best effort — a read-only
+  config directory must not stop `amd board`. `AMD_NO_REGISTER=1` opts out, and
+  only then does `amd repos remove` stick.
+- **`amd repos` and `amd completions` run before the board is resolved.** Asking
+  what's on the list must not add to it, and both have to work outside a repo.
+  That bug shipped for one commit and the CLI suite now covers it.
 - `Registry::boards()` always includes the repository you're standing in, listed
   or not — you should never open the TUI and not see the board you're in.
 - Ids restart at 001 in every repository, so a `Card` carries which repo it came

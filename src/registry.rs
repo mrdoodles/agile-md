@@ -138,6 +138,36 @@ impl Registry {
     }
 }
 
+/// Remember a repository we've just worked in, so the list fills itself from
+/// the boards you actually use rather than from anyone maintaining it. Called
+/// on every command that resolves a board, and writes only the first time a
+/// repository is seen.
+///
+/// Best effort: a read-only config directory is no reason for `amd board` to
+/// fail. Set `AMD_NO_REGISTER=1` to keep the list entirely manual — after which
+/// `amd repos remove` sticks, because nothing puts it back.
+pub fn remember(board: &Board) -> bool {
+    if std::env::var("AMD_NO_REGISTER").as_deref() == Ok("1") {
+        return false;
+    }
+    let Some(path) = path() else {
+        return false;
+    };
+    let Some(root) = board.root.parent() else {
+        return false;
+    };
+    remember_in(&path, root)
+}
+
+/// The half that takes a path, so tests need no environment fiddling.
+fn remember_in(config: &Path, root: &Path) -> bool {
+    let mut registry = Registry::load_from(config);
+    match registry.add(root) {
+        Ok(true) => registry.save_to(config).is_ok(),
+        _ => false,
+    }
+}
+
 /// `$XDG_CONFIG_HOME/agile-md/repos`, else `~/.config/agile-md/repos`.
 fn path() -> Option<PathBuf> {
     let base = std::env::var_os("XDG_CONFIG_HOME")
@@ -223,6 +253,42 @@ mod tests {
         assert!(!registry.remove("alpha"));
         assert!(registry.remove(beta.to_str().unwrap()));
         assert!(registry.entries.is_empty());
+    }
+
+    #[test]
+    fn working_in_a_repository_remembers_it_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let alpha = repo(dir.path(), "alpha");
+        let config = dir.path().join("config/repos");
+
+        assert!(remember_in(&config, &alpha), "first visit registers");
+        assert!(
+            !remember_in(&config, &alpha),
+            "second visit changes nothing"
+        );
+        let registry = Registry::load_from(&config);
+        assert_eq!(registry.entries.len(), 1);
+        assert_eq!(registry.entries[0].name, "alpha");
+    }
+
+    #[test]
+    fn remembering_leaves_the_rest_of_the_list_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let alpha = repo(dir.path(), "alpha");
+        let beta = repo(dir.path(), "beta");
+        let config = dir.path().join("config/repos");
+
+        let mut registry = Registry::default();
+        registry.add(&beta).unwrap();
+        registry.save_to(&config).unwrap();
+
+        remember_in(&config, &alpha);
+        let names: Vec<String> = Registry::load_from(&config)
+            .entries
+            .iter()
+            .map(|entry| entry.name.clone())
+            .collect();
+        assert_eq!(names, ["alpha", "beta"]);
     }
 
     #[test]

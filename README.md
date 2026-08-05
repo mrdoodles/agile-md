@@ -165,21 +165,27 @@ the dependency itself.
 
 ## Several repositories at once
 
-Register the repositories you work in, and the TUI shows their boards together:
+**The list fills itself.** Every repository you run `amd` in is remembered, so
+the boards you actually work on are all there next session — nothing to
+maintain:
 
 ```bash
-amd repos add                 # the one you're standing in
-amd repos add ../other-repo
-amd repos                     # what's registered
+amd repos                     # what's been seen so far
+amd repos add ../other-repo   # add one you haven't visited yet
 amd repos remove other-repo   # by name or by path
 ```
+
+`amd repos` works anywhere, including outside a repository, and asking what's on
+the list doesn't add to it. A removed repository comes back the next time you
+work in it; `AMD_NO_REGISTER=1` keeps the list entirely manual, and then removal
+sticks.
 
 In the TUI, `p` picks a repository (or all of them) and `a` picks an assignee
 (or everyone, or unassigned). With more than one board in view each card says
 which repository it came from, since ids restart at 001 in every repo.
 
 The registry is a **list of repositories, and nothing else** — one path per line
-in `~/.config/agile-md/repos`:
+in `~/.config/agile-md/repos`, written only when a repository is first seen:
 
 ```
 # Repositories agile-md knows about, one path per line.

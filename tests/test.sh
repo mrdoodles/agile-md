@@ -213,8 +213,13 @@ assert "@me resolves to the git user" \
   bash -c "'${AMD}' assign 1 @me >/dev/null && grep -q '^assignee: \"t\"$' tasks/*/001-first-task.md"
 
 echo "repositories:"
-assert "an empty registry says so" bash -c "'${AMD}' repos | grep -q 'no repositories registered'"
-assert "the current repository can be registered" \
+assert "working in a repository remembers it" \
+  bash -c "'${AMD}' repos | grep -q \"$(basename "${tmp}")\""
+assert "it is remembered once, not once per command" \
+  bash -c "'${AMD}' board >/dev/null; '${AMD}' board >/dev/null; [ \"\$('${AMD}' repos | grep -c \"$(basename "${tmp}")\")\" = 1 ]"
+assert "AMD_NO_REGISTER keeps the list manual" \
+  bash -c "'${AMD}' repos remove \"$(basename "${tmp}")\" >/dev/null && AMD_NO_REGISTER=1 '${AMD}' board >/dev/null && '${AMD}' repos | grep -q 'no repositories registered'"
+assert "the current repository can be registered explicitly" \
   bash -c "'${AMD}' repos add | grep -q 'registered'"
 assert "registering lists it by name" bash -c "'${AMD}' repos | grep -q \"$(basename "${tmp}")\""
 assert "registering twice is a no-op" bash -c "'${AMD}' repos add | grep -q 'already registered'"

@@ -270,17 +270,29 @@ fn run() -> Result<()> {
         return completions::print(shell, &mut Cli::command());
     }
 
+    // Nor does the registry: it's a list of repositories, and asking what's on
+    // it shouldn't put the current one there. `amd repos` works anywhere.
+    if let Cmd::Repos { command } = command {
+        return cmd_repos(command.unwrap_or(ReposCmd::List));
+    }
+
     // `init` is the one command that runs without an existing board.
     if let Cmd::Init = command {
         let board = Board::locate()?;
         board.create()?;
+        agile_md::registry::remember(&board);
         println!("Initialised agile-md board at {}", board.root.display());
         return Ok(());
     }
 
     let board = ensure_board()?;
+    // Every repository you work in joins the list, so the boards you actually
+    // use are all there next session without anyone curating them.
+    agile_md::registry::remember(&board);
     match command {
-        Cmd::Init | Cmd::Completions { .. } => unreachable!("handled above"),
+        Cmd::Init | Cmd::Completions { .. } | Cmd::Repos { .. } => {
+            unreachable!("handled above")
+        }
         Cmd::New(args) => cmd_new(&board, args),
         Cmd::Board => cmd_ls(&board, "all"),
         Cmd::Ls { column } => cmd_ls(&board, &column),
@@ -325,7 +337,6 @@ fn run() -> Result<()> {
             }
             Ok(())
         }
-        Cmd::Repos { command } => cmd_repos(command.unwrap_or(ReposCmd::List)),
         Cmd::Link { task, to, one_way } => cmd_link(&board, &task, &to, one_way),
         Cmd::Templates { command } => cmd_templates(&board, command.unwrap_or(TemplateCmd::List)),
     }
