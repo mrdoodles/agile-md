@@ -62,8 +62,13 @@ one implementation of the board.
 
 - `Board::locate()` resolves the board as `$(git rev-parse --show-toplevel)/${AMD_DIR:-tasks}`,
   so `amd` works from any subdirectory; it errors if not inside a git repo.
-- Tasks are `NNN-slug.md`. `Board::next_id()` = max existing id across all
-  columns + 1, zero-padded — a stable id and a default ordering.
+- Tasks are `NNN-slug.md`. `Board::next_id()` takes whichever is higher of the
+  counter in `<board>/.next-id` and one past the highest id in the columns. The
+  counter is the authority — it remembers ids whose tickets have gone, junked or
+  deleted, which no scan can — and the scan is the safety net, so a lost or
+  badly merged counter can't hand out an id already in use. `record_id()` runs
+  in `Draft::write`, not `prepare`: an abandoned draft leaves no gap. The junk
+  drawer isn't scanned; the counter covers it.
 - `Board::find(<ref>)` resolves a numeric id or a unique slug substring to one
   task (errors on 0 or >1 matches).
 - `Board::move_task()` uses `git mv` for tracked files (history follows the
@@ -72,9 +77,9 @@ one implementation of the board.
   a column: it's off the board and its contents are gitignored. That means
   `git mv` would refuse the ignored destination and forcing it would put the
   junk back into the history the `.gitignore` exists to keep out, so a tracked
-  ticket is `git rm --cached`'d and then moved. `next_id()` counts the junk
-  drawer as well — reusing a junked id would silently repoint every `parent`
-  and `related` that named it.
+  ticket is `git rm --cached`'d and then moved. Junked ids are never reused —
+  that's the counter's job — because reusing one would silently repoint every
+  `parent` and `related` that named it.
 - `Board::ensure()` runs before any board-requiring command: if there's no
   board, it prompts to create one when interactive (`stdin().is_terminal()`),
   auto-creates when `AMD_YES=1`, and otherwise errors (never hangs

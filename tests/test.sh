@@ -215,6 +215,10 @@ assert "junk stays out of git" bash -c "! git status --porcelain | grep -q 'task
 assert "a junked ticket is no longer findable" bash -c "! '${AMD}' show bin-this-one"
 assert "ids are not reused after junking" \
   bash -c "before=\$(ls tasks/junk | head -1 | cut -d- -f1); '${AMD}' new 'After the bin' >/dev/null; ! test -f tasks/todo/\${before}-after-the-bin.md"
+assert "the counter records the next id" \
+  bash -c "test \"\$(cat tasks/.next-id)\" -gt \"\$(ls tasks/todo | tail -1 | cut -d- -f1 | sed 's/^0*//')\""
+assert "a deleted ticket does not hand its id back" \
+  bash -c "'${AMD}' new 'Doomed' >/dev/null; id=\$(ls tasks/todo | grep doomed | cut -d- -f1); rm tasks/todo/\${id}-doomed.md; '${AMD}' new 'After the delete' >/dev/null; ! test -f tasks/todo/\${id}-after-the-delete.md"
 
 echo "assignees:"
 assert "a new ticket is unassigned" \

@@ -48,6 +48,8 @@ pub struct NewTicket {
 pub struct Draft {
     pub path: PathBuf,
     pub id: String,
+    /// The same id as a number, for the board's counter.
+    pub number: u32,
     pub slug: String,
     /// Branch the ticket will be worked on, empty when its type doesn't use one.
     pub branch: String,
@@ -165,6 +167,7 @@ impl Draft {
         Ok(Draft {
             path,
             id,
+            number,
             slug,
             branch: branch_name,
             body,
@@ -186,6 +189,8 @@ impl Draft {
             .expect("a task path always has a column directory");
         fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
         fs::write(&self.path, body).with_context(|| format!("writing {}", self.path.display()))?;
+        // The id is spent only now: a draft that was abandoned leaves no gap.
+        board.record_id(self.number)?;
 
         let stem = format!("{}-{}", self.id, self.slug);
         let mut linked = Vec::new();

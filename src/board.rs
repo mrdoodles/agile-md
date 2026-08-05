@@ -26,6 +26,11 @@ const JUNK: &str = "junk";
 /// Keeps the junk drawer itself in git while ignoring what's in it.
 const JUNK_GITIGNORE: &str = "*\n!.gitignore\n";
 
+/// The board's id counter: the number the next ticket will take. One line,
+/// tracked with the board, so ids keep climbing even when tickets are deleted
+/// outright rather than junked — a scan can only see what's still there.
+const COUNTER: &str = ".next-id";
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Column {
     Todo,
@@ -133,6 +138,19 @@ impl Board {
         self.root.join(JUNK)
     }
 
+    pub fn counter_path(&self) -> PathBuf {
+        self.root.join(COUNTER)
+    }
+
+    /// What the counter file says, if it says anything sensible.
+    fn stored_next_id(&self) -> Option<u32> {
+        fs::read_to_string(self.counter_path())
+            .ok()?
+            .trim()
+            .parse::<u32>()
+            .ok()
+    }
+
     /// Scaffold the columns and the board README. Idempotent.
     pub fn create(&self) -> Result<()> {
         for column in Column::ALL {
@@ -150,6 +168,12 @@ impl Board {
         if !ignore.exists() {
             fs::write(&ignore, JUNK_GITIGNORE)
                 .with_context(|| format!("creating {}", ignore.display()))?;
+        }
+
+        let counter = self.counter_path();
+        if !counter.exists() {
+            fs::write(&counter, "1\n")
+                .with_context(|| format!("creating {}", counter.display()))?;
         }
 
         let readme = self.root.join("README.md");
@@ -243,18 +267,35 @@ impl Board {
         Ok(tasks)
     }
 
-    /// Next id: one past the highest anywhere, **including the junk drawer**.
-    /// Reusing the id of a junked ticket would silently repoint every `parent`
-    /// and `related` that named it.
+    /// The id the next ticket will take: whichever is higher of the counter
+    /// file and one past the highest id on the board.
+    ///
+    /// The counter is the authority — it remembers ids whose tickets have gone,
+    /// junked or deleted, which no scan can. The scan is the safety net: a
+    /// lost, stale or badly merged counter can then never hand out an id that
+    /// is already in use, and a ticket added by hand still pushes it along.
+    /// Only the columns are scanned; the junk drawer is off the board and the
+    /// counter already accounts for it.
     pub fn next_id(&self) -> Result<u32> {
-        let max = self
+        let highest = self
             .tasks()?
             .iter()
-            .chain(self.junked()?.iter())
             .filter_map(|task| task.id)
             .max()
             .unwrap_or(0);
-        Ok(max + 1)
+        Ok(self.stored_next_id().unwrap_or(0).max(highest + 1))
+    }
+
+    /// Record that `used` has been taken, so the next ticket gets the one
+    /// after. Called once the ticket is on disk, never when one is merely
+    /// drafted — an abandoned draft should leave no gap.
+    pub fn record_id(&self, used: u32) -> Result<()> {
+        let next = used.saturating_add(1);
+        if self.stored_next_id().is_some_and(|stored| stored >= next) {
+            return Ok(());
+        }
+        let path = self.counter_path();
+        fs::write(&path, format!("{next}\n")).with_context(|| format!("writing {}", path.display()))
     }
 
     /// Take a ticket off the board. The junk directory is gitignored, so a
@@ -333,6 +374,72 @@ fn dir_name() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn board_at(dir: &std::path::Path) -> Board {
+        let board = Board::at(dir.join("tasks"));
+        board.create().expect("board");
+        board
+    }
+
+    fn touch(board: &Board, name: &str) {
+        fs::write(board.dir(Column::Todo).join(name), "---\n---\n").unwrap();
+    }
+
+    #[test]
+    fn a_new_board_starts_at_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board_at(dir.path());
+        assert_eq!(board.next_id().unwrap(), 1);
+        assert_eq!(
+            fs::read_to_string(board.counter_path()).unwrap().trim(),
+            "1"
+        );
+    }
+
+    #[test]
+    fn the_counter_moves_on_as_tickets_are_recorded() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board_at(dir.path());
+        touch(&board, "001-one.md");
+        board.record_id(1).unwrap();
+        assert_eq!(board.next_id().unwrap(), 2);
+        touch(&board, "002-two.md");
+        board.record_id(2).unwrap();
+        assert_eq!(board.next_id().unwrap(), 3);
+    }
+
+    #[test]
+    fn a_deleted_ticket_does_not_hand_its_id_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board_at(dir.path());
+        touch(&board, "001-one.md");
+        board.record_id(1).unwrap();
+        // Deleted outright, not junked: nothing on disk remembers it.
+        fs::remove_file(board.dir(Column::Todo).join("001-one.md")).unwrap();
+        assert_eq!(board.next_id().unwrap(), 2, "the counter still knows");
+    }
+
+    #[test]
+    fn a_lost_or_stale_counter_cannot_collide() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board_at(dir.path());
+        touch(&board, "007-seven.md");
+        // Counter behind what's on disk — a bad merge, or a hand-added ticket.
+        fs::write(board.counter_path(), "3\n").unwrap();
+        assert_eq!(board.next_id().unwrap(), 8);
+        // Counter missing entirely.
+        fs::remove_file(board.counter_path()).unwrap();
+        assert_eq!(board.next_id().unwrap(), 8);
+    }
+
+    #[test]
+    fn recording_an_older_id_does_not_wind_the_counter_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board_at(dir.path());
+        board.record_id(9).unwrap();
+        board.record_id(2).unwrap();
+        assert_eq!(board.next_id().unwrap(), 10);
+    }
 
     #[test]
     fn columns_move_left_until_todo() {

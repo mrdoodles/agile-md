@@ -157,8 +157,8 @@ the history rather than lingering in it. For a ticket that was committed, that
 means `git rm --cached` and a move, which shows up as a deletion to commit like
 any other board change.
 
-Junked tickets **keep their ids**. The next new ticket won't reuse one, because
-`parent` and `related` elsewhere may still name it.
+Junked tickets **keep their ids** — the board's counter remembers them, so
+nothing new takes an id that `parent` or `related` somewhere may still name.
 
 ## Related tickets
 
