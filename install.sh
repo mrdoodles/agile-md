@@ -3,7 +3,7 @@
 # agile-md installer — install the `amd` command onto your PATH.
 #
 #   ./install.sh [--dir DIR]     # default: /usr/local/bin if writable, else ~/bin
-#   curl -fsSL https://raw.githubusercontent.com/mrdoodles/agile-md/v3/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/mrdoodles/agile-md/v4/install.sh | bash
 #
 # Then, in any git repository:  amd init  &&  amd new "My first task"
 #
@@ -25,7 +25,7 @@ if [ -z "${DIR}" ]; then
 fi
 
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RAW="https://raw.githubusercontent.com/mrdoodles/agile-md/v3"
+RAW="https://raw.githubusercontent.com/mrdoodles/agile-md/v4"
 
 mkdir -p "${DIR}"
 if [ -f "${SELF}/amd" ]; then

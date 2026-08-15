@@ -45,8 +45,9 @@ assert "board shows all three columns" \
   bash -c "bash '${AMD}' board | grep -q TODO && bash '${AMD}' board | grep -q DOING && bash '${AMD}' board | grep -q DONE"
 
 echo "moves (git mv):"
-bash "${AMD}" start 1 >/dev/null
-assert "start: todo -> doing" test -f tasks/doing/001-first-task.md
+bash "${AMD}" doing 1 >/dev/null
+assert "doing: todo -> doing" test -f tasks/doing/001-first-task.md
+assert "the old 'start' name is gone" bash -c "! bash '${AMD}' start 1"
 bash "${AMD}" "done" 1 >/dev/null
 assert "done: doing -> done" test -f tasks/done/001-first-task.md
 assert "moved via git (rename tracked)" bash -c 'git status --porcelain | grep -q "^R"'
@@ -54,7 +55,7 @@ bash "${AMD}" back 1 >/dev/null
 assert "back: done -> doing" test -f tasks/doing/001-first-task.md
 
 echo "refs + ids:"
-bash "${AMD}" start second >/dev/null
+bash "${AMD}" doing second >/dev/null
 assert "find by slug substring" test -f tasks/doing/002-second-task.md
 bash "${AMD}" new "Third" >/dev/null
 assert "ids continue across columns (003)" test -f tasks/todo/003-third.md

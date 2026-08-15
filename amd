@@ -10,7 +10,7 @@
 #   amd new "<title>" [options]       create a task in todo/
 #   amd board [filters]               show all columns (default)
 #   amd ls [todo|doing|done|archive|all] [filters]
-#   amd start <ref>                   todo  -> doing
+#   amd doing <ref>                   todo  -> doing
 #   amd done  <ref>                   doing -> done
 #   amd back  <ref>                   move a task one column left
 #   amd show  <ref>                   print a task
@@ -404,11 +404,12 @@ case "${cmd}" in
       *) die "unknown field '${field}' (use: priority, repository)" ;;
     esac
     ;;
-  start)
+  # Each move command is named for the column it moves the task *into*.
+  doing)
     # Assign first: a `die` inside a substitution used directly as an argument
     # only kills the subshell, so the command would run on an empty path and
     # report a second, confusing error.
-    file="$(find_task "${1:?usage: amd start <ref>}")"
+    file="$(find_task "${1:?usage: amd doing <ref>}")"
     move "${file}" doing
     ;;
   "done")

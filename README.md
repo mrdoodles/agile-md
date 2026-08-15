@@ -12,7 +12,7 @@ A tiny **filesystem Kanban** — tasks are markdown files moved between `todo/`,
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mrdoodles/agile-md/v3/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/mrdoodles/agile-md/v4/install.sh | bash
 ```
 
 Installs the `amd` command to `/usr/local/bin` when it's writable, otherwise
@@ -27,7 +27,7 @@ In any git repository:
 amd init                          # scaffold tasks/{todo,doing,done} here
 amd new "Publish to Marketplace" -t release -p high
 amd board                         # show all columns (the default)
-amd start 1                       # todo  -> doing
+amd doing 1                       # todo  -> doing
 amd done  1                       # doing -> done
 amd back  1                       # move one column left
 amd show  publish                 # print a task (id or slug substring)
