@@ -12,7 +12,7 @@ A tiny **filesystem Kanban** — tasks are markdown files moved between `todo/`,
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mrdoodles/agile-md/v3/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/mrdoodles/agile-md/v4/install.sh | bash
 ```
 
 Installs the `amd` command to `/usr/local/bin` when it's writable, otherwise
