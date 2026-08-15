@@ -24,6 +24,8 @@ git init -q; git config user.email t@t.co; git config user.name t
 echo "init:"
 bash "${AMD}" init >/dev/null
 assert "init creates todo/doing/done" test -d tasks/todo -a -d tasks/doing -a -d tasks/done
+assert "init creates an archive that keeps itself out of git" \
+  bash -c "test -f tasks/archive/.gitignore && grep -q '^\*$' tasks/archive/.gitignore"
 
 echo "discovery from a subdirectory:"
 mkdir -p deep/nested
@@ -89,6 +91,124 @@ assert "a MARKDOWN_EDITOR this machine hasn't got falls back to EDITOR" \
 assert "editor arguments are honoured" \
   test "$(edited_by MARKDOWN_EDITOR='md-ed --wait')" = "md-ed --wait ${task3}"
 rm -rf "${bin}"
+echo "archive:"
+bash "${AMD}" new "Archive me" >/dev/null
+git add -A; git commit -qm archivable
+archived_file="$(basename tasks/todo/*-archive-me.md)"
+archived_id="${archived_file%%-*}"
+assert "archive takes a task off the board" \
+  bash -c "bash '${AMD}' archive archive-me | grep -q 'archived'"
+assert "the file is in archive/" test -f "tasks/archive/${archived_id}-archive-me.md"
+assert "the board no longer shows it" \
+  bash -c "! bash '${AMD}' board | grep -q 'Archive me'"
+assert "ls archive still lists it" \
+  bash -c "bash '${AMD}' ls archive | grep -q 'Archive me'"
+assert "git records the task leaving the board" \
+  bash -c "git status --porcelain | grep -q '^D  tasks/todo/.*archive-me'"
+assert "the archive itself stays out of git" \
+  bash -c "! git status --porcelain | grep -q 'tasks/archive/0'"
+assert "an archived task is no longer findable" bash -c "! bash '${AMD}' show archive-me"
+assert "a bad ref reports once and stops" \
+  bash -c "test \"\$(bash '${AMD}' show 999 2>&1 | wc -l)\" -eq 1"
+assert "ids do not go back after archiving" \
+  bash -c "bash '${AMD}' new 'After archiving' >/dev/null; ! test -f tasks/todo/${archived_id}-after-archiving.md"
+
+echo "archiving on a board that predates archive/:"
+legacy="$(mktemp -d)"
+(
+  cd "${legacy}" || exit 1
+  git init -q; git config user.email t@t.co; git config user.name t
+  mkdir -p tasks/todo tasks/doing tasks/done          # no archive/, as v2 left it
+  printf -- '---\nid: "001"\ntitle: "Old"\ncreated: "2026-01-01"\ntags: []\n---\n' \
+    > tasks/todo/001-old.md
+  git add -A; git commit -qm seed
+  bash "${AMD}" archive 1 >/dev/null
+)
+cd "${legacy}" || exit 1
+assert "the archive is created on first use" test -f tasks/archive/001-old.md
+assert "and it brings its .gitignore with it" \
+  bash -c "test -f tasks/archive/.gitignore && grep -q '^\*\$' tasks/archive/.gitignore"
+assert "so the archived task never becomes untracked content" \
+  bash -c "! git status --porcelain --untracked-files=all | grep -q 'tasks/archive/001'"
+rm -f tasks/archive/.gitignore
+assert "any command puts a deleted .gitignore back" \
+  bash -c "bash '${AMD}' board >/dev/null && test -f tasks/archive/.gitignore"
+assert "and the archived tasks are still ignored" \
+  bash -c "! git status --porcelain --untracked-files=all | grep -q 'tasks/archive/001'"
+assert "restoring it does not disturb the archived tasks" test -f tasks/archive/001-old.md
+cd "${tmp}" || exit 1
+rm -rf "${legacy}"
+
+echo "clean:"
+assert "clean refuses to delete unprompted" \
+  bash -c "! bash '${AMD}' clean </dev/null"
+assert "and deletes nothing when it refuses" test -f "tasks/archive/${archived_id}-archive-me.md"
+assert "AMD_YES=1 empties the archive" \
+  bash -c "AMD_YES=1 bash '${AMD}' clean | grep -q 'deleted 1'"
+assert "the tasks are gone" bash -c "! test -f tasks/archive/${archived_id}-archive-me.md"
+assert "but the .gitignore is not" test -f tasks/archive/.gitignore
+assert "cleaning an empty archive says so" \
+  bash -c "AMD_YES=1 bash '${AMD}' clean | grep -q 'already empty'"
+assert "cleanup is the same command" \
+  bash -c "AMD_YES=1 bash '${AMD}' cleanup | grep -q 'already empty'"
+echo "priority + repository:"
+fields="$(mktemp -d)"
+(
+  cd "${fields}" || exit 1
+  git init -q; git config user.email t@t.co; git config user.name t
+  git remote add origin git@github.com:mrdoodles/agile-md.git
+  bash "${AMD}" init >/dev/null
+  bash "${AMD}" new "Alpha" -p low >/dev/null
+  bash "${AMD}" new "Bravo" -p h -r mrdoodles/lite-actions >/dev/null
+  bash "${AMD}" new "Charlie" >/dev/null
+  # a task written before these fields existed
+  printf -- '---\nid: "004"\ntitle: "Legacy"\ncreated: "2026-01-01"\ntags: []\n---\n' \
+    > tasks/todo/004-legacy.md
+)
+cd "${fields}" || exit 1
+# ids in listed order, so ordering is a single string comparison
+idlist() { bash "${AMD}" "$@" | sed -n 's/^  \[\([0-9]*\)\].*/\1/p' | tr -d '\n'; }
+
+assert "new records the repository from origin as owner/name" \
+  grep -q '^repository: "mrdoodles/agile-md"$' tasks/todo/001-alpha.md
+assert "-r overrides the repository" \
+  grep -q '^repository: "mrdoodles/lite-actions"$' tasks/todo/002-bravo.md
+assert "-p sets the priority (prefixes work)" \
+  grep -q '^priority: "high"$' tasks/todo/002-bravo.md
+assert "priority defaults to medium" grep -q '^priority: "medium"$' tasks/todo/003-charlie.md
+assert "the board shows priority and repository" \
+  bash -c "bash '${AMD}' ls todo | grep -q 'high .*Bravo  @mrdoodles/lite-actions'"
+
+assert "default order is by id" test "$(idlist ls todo)" = "001002003004"
+assert "-s priority orders high, medium, low" test "$(idlist ls todo -s priority)" = "002003001004"
+assert "a task with no priority sorts last" \
+  bash -c "test \"\$(bash '${AMD}' ls todo -s priority | sed -n 's/^  \[\([0-9]*\)\].*/\1/p' | tail -1)\" = 004"
+assert "AMD_SORT sets the default ordering" \
+  bash -c "test \"\$(AMD_SORT=priority bash '${AMD}' ls todo | sed -n 's/^  \[\([0-9]*\)\].*/\1/p' | tr -d '\n')\" = 002003001004"
+
+assert "-r filters to one repository" test "$(idlist ls todo -r lite-actions)" = "002"
+assert "the filter is a case-insensitive substring" test "$(idlist ls todo -r LITE)" = "002"
+assert "-r excludes tasks with no repository" test "$(idlist ls todo -r agile-md)" = "001003"
+assert "a filter that matches nothing leaves the column empty" \
+  bash -c "bash '${AMD}' ls todo -r nothing-here | grep -q '(empty)'"
+assert "board takes the same filters" test "$(idlist board -r lite-actions)" = "002"
+
+assert "set updates a priority" bash -c "bash '${AMD}' set 1 priority high | grep -q 'priority -> high'"
+assert "and the file says so" grep -q '^priority: "high"$' tasks/todo/001-alpha.md
+assert "set adds a field a legacy task never had" \
+  bash -c "bash '${AMD}' set 4 repository other/proj >/dev/null && grep -q '^repository: \"other/proj\"\$' tasks/todo/004-legacy.md"
+assert "the added field stays inside the frontmatter" \
+  bash -c "test \"\$(grep -c -- '^---\$' tasks/todo/004-legacy.md)\" -eq 2"
+assert "set leaves no temporary files behind" bash -c "! ls tasks/todo/*.tmp"
+assert "set rejects an unknown field" bash -c "! bash '${AMD}' set 1 colour red"
+assert "set rejects an unknown priority" bash -c "! bash '${AMD}' set 1 priority urgent"
+assert "and leaves the priority alone when it does" grep -q '^priority: "high"$' tasks/todo/001-alpha.md
+assert "new rejects an unknown priority" bash -c "! bash '${AMD}' new 'Nope' -p urgent"
+assert "an unknown sort is an error" bash -c "! bash '${AMD}' ls todo -s alphabetical"
+assert "an unknown column is an error" bash -c "! bash '${AMD}' ls sideways"
+assert "an option with no value is an error" bash -c "! bash '${AMD}' ls todo -r"
+cd "${tmp}" || exit 1
+rm -rf "${fields}"
 
 echo "guards:"
 assert "errors outside a git repository" \

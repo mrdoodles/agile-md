@@ -30,13 +30,33 @@ audit trail** (moves are `git mv`), tasks are self-describing markdown.
   zero-padded — a stable id and a default ordering.
 - `find_task <ref>` resolves a numeric id or a unique slug substring to one file
   (errors on 0 or >1 matches).
+- Frontmatter carries `repository` and `priority`. `list_column` builds
+  `rank<TAB>id<TAB>line` rows so one `sort` serves both orderings (`-s
+  id|priority`), then `cut`s the keys back off; `repo_matches` filters on a
+  case-insensitive substring of `repository`. Unset/unknown priorities rank
+  last, so boards predating the fields still list and sort — don't "fix" that
+  by defaulting them to medium at read time.
+- `set_field` rewrites one frontmatter key, inserting it before the closing
+  `---` when the task predates it. Anything that can `die` must be assigned to
+  a variable first (`p="$(priority_of "$x")"`) — a `die` inside a substitution
+  used directly as an argument only kills the subshell, and the caller happily
+  proceeds with an empty string.
 - `move()` uses `git mv` for tracked files (history follows the rename), else
   plain `mv`. It does **not** commit — the user commits the move.
+- `archive/` is the drawer: `ensure_archive` creates it *with* its `.gitignore`
+  (`*` + `!.gitignore`) and is called from `create_board`, `archive_task` and
+  `ensure_board`, so the directory can never exist unprotected — that is how
+  archived tasks would silently get committed. `archive_task` does
+  `git rm --cached` then a plain `mv` (a `git mv` into an ignored path is
+  refused, and forcing it defeats the `.gitignore`). `next_id` counts archived
+  ids so they're never reused; `find_task` does *not* search archive, so an
+  archived task stops resolving as a `<ref>`.
 - `ensure_board()` runs before any board-requiring command: if there's no board,
   it prompts to create one when interactive (`[ -t 0 ]`), auto-creates when
   `AMD_YES=1`, and otherwise errors (never hangs non-interactively).
 - Env vars: `AMD_DIR` (board dir name, default `tasks`), `AMD_YES` (force-create),
-  `MARKDOWN_EDITOR`/`EDITOR` (`amd edit`).
+  `AMD_SORT` (default ordering, `id` or `priority`), `MARKDOWN_EDITOR`/`EDITOR`
+  (`amd edit`).
 - `resolve_editor` picks the first of `MARKDOWN_EDITOR`, `EDITOR`, `vi` that is
   non-empty *and* on PATH (`command -v` on the first word), and puts it in the
   `EDITOR_ARGV` array so values with arguments (`code --wait`) still work — the
@@ -84,7 +104,8 @@ update the `RAW=.../agile-md/vN` line in `install.sh` and the `curl` URL in
 
 ## Conventions
 
-- Public, unprotected repo — push docs/fixes to `main` directly; workflow-file
-  changes need a `workflow`-scoped token.
+- Public repo; `main` is **protected** — everything lands via a pull request,
+  including one-line docs and CI fixes. Workflow-file changes additionally need
+  a `workflow`-scoped token to push.
 - Co-authored commits use the bot identity, not the Anthropic no-reply:
   `Co-Authored-By: Claude <309050497+MrDClaudeBot@users.noreply.github.com>`.
