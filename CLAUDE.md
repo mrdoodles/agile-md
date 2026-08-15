@@ -101,6 +101,9 @@ update the `RAW=.../agile-md/vN` line in `install.sh` and the `curl` URL in
 - **v2** — global `task` command; board discovered from the repo root; `task init`.
 - **v3** — command renamed `task` → **`amd`**; env `TASK_YES`/`TASKS_DIR` →
   `AMD_YES`/`AMD_DIR`. `@v3`/`@v2` are moving major tags.
+- **v4** — `amd start` renamed to **`amd doing`**, so every move command is
+  named for the column it moves the task into (`doing`, `done`). No alias is
+  kept: `amd start` is an unknown command.
 
 ## Conventions
 
