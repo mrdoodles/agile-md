@@ -33,6 +33,8 @@ amd back  1                       # move one column left
 amd show  publish                 # print a task (id or slug substring)
 amd edit  1                       # open in $EDITOR
 amd set   1 priority low          # change a field on an existing task
+amd archive 1                     # off the board, into tasks/archive/
+amd clean                         # delete the archive for good
 ```
 
 `amd` works from any subdirectory — it resolves the board from the repo root.
@@ -57,6 +59,39 @@ Ordering is by id unless you ask for `-s priority`; set `AMD_SORT=priority` to
 make that the default. Tasks written before these fields existed keep working —
 they show a `-` for priority, sort last under `-s priority`, and `amd set` adds
 the missing field to the frontmatter.
+
+## Archive
+
+Not every task deserves to be `done` — some are abandoned, duplicated, or were
+never really tasks. `amd archive <ref>` takes one off the board without
+deleting it:
+
+```bash
+amd archive 4                     # tasks/todo/004-… -> tasks/archive/004-…
+amd ls archive                    # the only view that shows them
+amd clean                         # delete everything in archive/, permanently
+```
+
+`amd init` creates `tasks/archive/` with a `.gitignore` that ignores the whole
+directory, keeping only itself:
+
+```gitignore
+*
+!.gitignore
+```
+
+So the drawer is tracked but its contents never are. Archiving is a plain `mv`
+after `git rm --cached` — the task leaves the board *and* the history, which
+is the point: `git mv` into an ignored directory would either be refused or
+force the archive back into the repository the `.gitignore` exists to keep it
+out of. Your commit of the archive shows only the deletion from the column.
+
+Two things archiving deliberately does not do: archived ids are never reused
+(`amd new` counts the archive too, so old `[[NNN-slug]]` references can't be
+silently repointed at a different task), and archived tasks stop resolving as
+a `<ref>` — `amd show 4` won't find one. `amd clean` is the only command in
+`amd` that deletes anything, and it refuses to run non-interactively unless
+you set `AMD_YES=1`.
 
 If you run a command in a repo that has no board yet, `amd` offers to create
 one for you (interactively). In non-interactive use it errors instead of

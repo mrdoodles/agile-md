@@ -43,6 +43,14 @@ audit trail** (moves are `git mv`), tasks are self-describing markdown.
   proceeds with an empty string.
 - `move()` uses `git mv` for tracked files (history follows the rename), else
   plain `mv`. It does **not** commit — the user commits the move.
+- `archive/` is the drawer: `ensure_archive` creates it *with* its `.gitignore`
+  (`*` + `!.gitignore`) and is called from `create_board`, `archive_task` and
+  `ensure_board`, so the directory can never exist unprotected — that is how
+  archived tasks would silently get committed. `archive_task` does
+  `git rm --cached` then a plain `mv` (a `git mv` into an ignored path is
+  refused, and forcing it defeats the `.gitignore`). `next_id` counts archived
+  ids so they're never reused; `find_task` does *not* search archive, so an
+  archived task stops resolving as a `<ref>`.
 - `ensure_board()` runs before any board-requiring command: if there's no board,
   it prompts to create one when interactive (`[ -t 0 ]`), auto-creates when
   `AMD_YES=1`, and otherwise errors (never hangs non-interactively).
