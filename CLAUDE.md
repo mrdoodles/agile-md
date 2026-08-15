@@ -78,7 +78,8 @@ update the `RAW=.../agile-md/vN` line in `install.sh` and the `curl` URL in
 
 ## Conventions
 
-- Public, unprotected repo — push docs/fixes to `main` directly; workflow-file
-  changes need a `workflow`-scoped token.
+- Public repo; `main` is **protected** — everything lands via a pull request,
+  including one-line docs and CI fixes. Workflow-file changes additionally need
+  a `workflow`-scoped token to push.
 - Co-authored commits use the bot identity, not the Anthropic no-reply:
   `Co-Authored-By: Claude <309050497+MrDClaudeBot@users.noreply.github.com>`.
