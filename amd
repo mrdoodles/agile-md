@@ -9,12 +9,18 @@
 #   amd init                          create the board in this repository
 #   amd new "<title>" [-t tag ...]    create a task in todo/
 #   amd board                         show all columns (default)
-#   amd ls [todo|doing|done|all]      list a column
+#   amd ls [todo|doing|done|archive|all]  list a column
 #   amd start <ref>                   todo  -> doing
 #   amd done  <ref>                   doing -> done
 #   amd back  <ref>                   move a task one column left
 #   amd show  <ref>                   print a task
 #   amd edit  <ref>                   open a task in $EDITOR
+#   amd archive <ref>                 take a task off the board, into archive/
+#   amd clean                         delete everything in archive/ for good
+#
+# Archived tasks stay on disk but leave the board and the history: archive/ is
+# gitignored. `amd ls archive` lists them; `amd clean` is the only thing that
+# deletes anything.
 #
 # <ref> is a task id (e.g. 7 or 007) or a unique slug substring.
 # Set AMD_DIR to use a board directory other than "tasks".
@@ -44,7 +50,9 @@ column_of() { basename "$(dirname "$1")"; }
 
 next_id() {
   local max=0 n f c
-  for c in "${COLUMNS[@]}"; do
+  # Archived tasks still hold their ids: reusing one would point every
+  # reference at a different task.
+  for c in "${COLUMNS[@]}" archive; do
     for f in "${BOARD}/${c}"/*.md; do
       [ -e "${f}" ] || continue
       n="$(basename "${f}" | sed -E 's/^0*([0-9]+)-.*/\1/')"
@@ -84,6 +92,59 @@ move() { # <file> <dest-column>
   printf 'moved %s -> %s/\n' "$(basename "${src}")" "${col}"
 }
 
+# The drawer itself is tracked; what you put in it is not. Boards created
+# before archive/ existed get theirs on first use, so an archived task can
+# never arrive in a directory that git is still watching.
+ensure_archive() {
+  mkdir -p "${BOARD}/archive"
+  if [ ! -e "${BOARD}/archive/.gitignore" ]; then
+    printf '*\n!.gitignore\n' > "${BOARD}/archive/.gitignore"
+  fi
+}
+
+archive_task() { # <file> — off the board, but still on disk
+  local src="$1" name dest
+  name="$(basename "${src}")"
+  dest="${BOARD}/archive/${name}"
+  ensure_archive
+  if [ -e "${dest}" ]; then die "${dest} already exists"; fi
+  # archive/ is gitignored, so `git mv` would refuse the destination and
+  # forcing it would put the archive back into the history the .gitignore
+  # exists to keep out. Drop it from the index instead, then move the file.
+  if git -C "${BOARD}" ls-files --error-unmatch "${src}" >/dev/null 2>&1; then
+    git -C "${BOARD}" rm --cached --quiet -- "${src}" >/dev/null
+  fi
+  mv "${src}" "${dest}"
+  printf 'archived %s -> archive/\n' "${name}"
+}
+
+clean_archive() { # the only command that deletes anything
+  local f reply files=()
+  for f in "${BOARD}/archive"/*.md; do
+    [ -e "${f}" ] || continue
+    files+=("${f}")
+  done
+  if [ "${#files[@]}" -eq 0 ]; then
+    printf 'archive is already empty\n'
+    return 0
+  fi
+  if [ "${AMD_YES:-}" = "1" ]; then
+    reply=y
+  elif [ -t 0 ]; then
+    printf 'Delete %s archived task(s) from %s? [y/N] ' "${#files[@]}" "${BOARD}/archive" >&2
+    read -r reply
+  else
+    die "refusing to delete ${#files[@]} archived task(s) unprompted (set AMD_YES=1)"
+  fi
+  case "${reply}" in
+    y|Y|yes|Yes|YES)
+      rm -f -- "${files[@]}"
+      printf 'deleted %s archived task(s)\n' "${#files[@]}"
+      ;;
+    *) die "nothing deleted" ;;
+  esac
+}
+
 list_column() {
   local c="$1" f id title found=0
   printf '\n%s\n' "$(printf '%s' "${c}" | tr '[:lower:]' '[:upper:]')"
@@ -101,6 +162,7 @@ create_board() { # scaffolds the board at $BOARD
   for c in todo doing "done"; do
     [ -e "${BOARD}/${c}/.gitkeep" ] || : > "${BOARD}/${c}/.gitkeep"
   done
+  ensure_archive
   if [ ! -e "${BOARD}/README.md" ]; then
     printf '# Tasks (agile-md)\n\nA filesystem Kanban managed by the `amd` command.\nStatus is the folder; `git mv` between columns is the audit trail.\nSee https://github.com/mrdoodles/agile-md\n' > "${BOARD}/README.md"
   fi
@@ -110,7 +172,10 @@ create_board() { # scaffolds the board at $BOARD
 # interactive, AMD_YES=1 to force, otherwise a clear error so it never hangs).
 ensure_board() {
   BOARD="$(board_dir)"
-  [ -d "${BOARD}" ] && return 0
+  # Every command repairs a missing archive/.gitignore on the way past: losing
+  # it is how archived tasks would quietly get committed, and the check costs
+  # one stat on a board that's already fine.
+  if [ -d "${BOARD}" ]; then ensure_archive; return 0; fi
   local reply=""
   if [ "${AMD_YES:-}" = "1" ]; then
     reply=y
@@ -174,8 +239,17 @@ case "${cmd}" in
       list_column "${target}"
     fi
     ;;
-  start) move "$(find_task "${1:?usage: amd start <ref>}")" doing ;;
-  done)  move "$(find_task "${1:?usage: amd done <ref>}")" "done" ;;
+  start)
+    # Assign first: a `die` inside a substitution used directly as an argument
+    # only kills the subshell, so the command would run on an empty path and
+    # report a second, confusing error.
+    file="$(find_task "${1:?usage: amd start <ref>}")"
+    move "${file}" doing
+    ;;
+  "done")
+    file="$(find_task "${1:?usage: amd done <ref>}")"
+    move "${file}" "done"
+    ;;
   back)
     file="$(find_task "${1:?usage: amd back <ref>}")"
     case "$(column_of "${file}")" in
@@ -184,7 +258,18 @@ case "${cmd}" in
       todo) die "already in todo/" ;;
     esac
     ;;
-  show) cat "$(find_task "${1:?usage: amd show <ref>}")" ;;
-  edit) "${EDITOR:-vi}" "$(find_task "${1:?usage: amd edit <ref>}")" ;;
+  archive)
+    file="$(find_task "${1:?usage: amd archive <ref>}")"
+    archive_task "${file}"
+    ;;
+  clean|cleanup) clean_archive ;;
+  show)
+    file="$(find_task "${1:?usage: amd show <ref>}")"
+    cat "${file}"
+    ;;
+  edit)
+    file="$(find_task "${1:?usage: amd edit <ref>}")"
+    "${EDITOR:-vi}" "${file}"
+    ;;
   *) die "unknown command '${cmd}' (try: amd help)" ;;
 esac
