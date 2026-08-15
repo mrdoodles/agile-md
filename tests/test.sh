@@ -57,6 +57,39 @@ assert "find by slug substring" test -f tasks/doing/002-second-task.md
 bash "${AMD}" new "Third" >/dev/null
 assert "ids continue across columns (003)" test -f tasks/todo/003-third.md
 
+echo "edit (MARKDOWN_EDITOR, then EDITOR):"
+# Fake editors that record which one ran, and with what.
+bin="$(mktemp -d)"
+for name in md-ed plain-ed; do
+  printf '#!/usr/bin/env bash\nprintf "%s %%s\\n" "$*" > "%s/ran"\n' "${name}" "${bin}" \
+    > "${bin}/${name}"
+  chmod +x "${bin}/${name}"
+done
+# Runs `amd edit 3` with the given environment and prints what actually ran.
+# -u clears whatever the developer has set, so the result is the script's doing;
+# the board path is trimmed back to a relative one (git resolves symlinks, so
+# the absolute path isn't the one mktemp handed us).
+edited_by() {
+  rm -f "${bin}/ran"
+  env -u MARKDOWN_EDITOR -u EDITOR PATH="${bin}:${PATH}" "$@" \
+    bash "${AMD}" edit 3 >/dev/null 2>&1 || true
+  if [ -f "${bin}/ran" ]; then sed 's#[^ ]*/tasks/#tasks/#' "${bin}/ran"
+  else printf 'nothing ran\n'; fi
+}
+task3="tasks/todo/003-third.md"
+
+assert "MARKDOWN_EDITOR opens the task" \
+  test "$(edited_by MARKDOWN_EDITOR=md-ed EDITOR=plain-ed)" = "md-ed ${task3}"
+assert "an unset MARKDOWN_EDITOR falls back to EDITOR" \
+  test "$(edited_by EDITOR=plain-ed)" = "plain-ed ${task3}"
+assert "an empty MARKDOWN_EDITOR falls back to EDITOR" \
+  test "$(edited_by MARKDOWN_EDITOR= EDITOR=plain-ed)" = "plain-ed ${task3}"
+assert "a MARKDOWN_EDITOR this machine hasn't got falls back to EDITOR" \
+  test "$(edited_by MARKDOWN_EDITOR=no-such-editor EDITOR=plain-ed)" = "plain-ed ${task3}"
+assert "editor arguments are honoured" \
+  test "$(edited_by MARKDOWN_EDITOR='md-ed --wait')" = "md-ed --wait ${task3}"
+rm -rf "${bin}"
+
 echo "guards:"
 assert "errors outside a git repository" \
   bash -c "cd '${nongit}' && ! bash '${AMD}' board"

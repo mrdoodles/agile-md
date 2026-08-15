@@ -31,11 +31,23 @@ amd start 1                       # todo  -> doing
 amd done  1                       # doing -> done
 amd back  1                       # move one column left
 amd show  publish                 # print a task (id or slug substring)
-amd edit  1                       # open in $EDITOR
+amd edit  1                       # open in $MARKDOWN_EDITOR
 ```
 
 `amd` works from any subdirectory — it resolves the board from the repo root.
 Set `AMD_DIR` to use a board directory other than `tasks`.
+
+Tasks are markdown, so `amd edit` prefers `$MARKDOWN_EDITOR` over `$EDITOR`,
+and falls back to `vi`:
+
+```bash
+export MARKDOWN_EDITOR="obsidian"   # or "code --wait", "typora", …
+```
+
+A candidate is skipped when it's unset, empty, or names a command this machine
+hasn't got — so `MARKDOWN_EDITOR` set in a dotfile you share between machines
+quietly falls back to `$EDITOR` on the ones without it. Arguments are allowed;
+only the command itself has to exist.
 
 If you run a command in a repo that has no board yet, `amd` offers to create
 one for you (interactively). In non-interactive use it errors instead of

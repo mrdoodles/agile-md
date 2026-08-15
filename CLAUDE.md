@@ -35,7 +35,13 @@ audit trail** (moves are `git mv`), tasks are self-describing markdown.
 - `ensure_board()` runs before any board-requiring command: if there's no board,
   it prompts to create one when interactive (`[ -t 0 ]`), auto-creates when
   `AMD_YES=1`, and otherwise errors (never hangs non-interactively).
-- Env vars: `AMD_DIR` (board dir name, default `tasks`), `AMD_YES` (force-create).
+- Env vars: `AMD_DIR` (board dir name, default `tasks`), `AMD_YES` (force-create),
+  `MARKDOWN_EDITOR`/`EDITOR` (`amd edit`).
+- `resolve_editor` picks the first of `MARKDOWN_EDITOR`, `EDITOR`, `vi` that is
+  non-empty *and* on PATH (`command -v` on the first word), and puts it in the
+  `EDITOR_ARGV` array so values with arguments (`code --wait`) still work — the
+  old `"${EDITOR:-vi}" "$file"` couldn't. Returning it as a string would undo
+  that, so it stays a global array.
 
 ## Commands
 
