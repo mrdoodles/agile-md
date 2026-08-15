@@ -14,7 +14,7 @@
 #   amd done  <ref>                   doing -> done
 #   amd back  <ref>                   move a task one column left
 #   amd show  <ref>                   print a task
-#   amd edit  <ref>                   open a task in $EDITOR
+#   amd edit  <ref>                   open a task in $MARKDOWN_EDITOR
 #   amd set   <ref> <field> <value>   set priority or repository on a task
 #   amd archive <ref>                 take a task off the board, into archive/
 #   amd clean                         delete everything in archive/ for good
@@ -34,7 +34,9 @@
 #
 # <ref> is a task id (e.g. 7 or 007) or a unique slug substring.
 # Set AMD_DIR to use a board directory other than "tasks", AMD_SORT to change
-# the default ordering.
+# the default ordering. `amd edit` uses $MARKDOWN_EDITOR, falling back to
+# $EDITOR (and then vi) if it's unset, empty, or names a command you haven't
+# got installed.
 #
 set -euo pipefail
 
@@ -257,6 +259,25 @@ list_column() {
   printf '%s\n' "${rows[@]}" | sort "${keys[@]}" | cut -f3-
 }
 
+# Tasks are markdown, so MARKDOWN_EDITOR wins if it's set to something this
+# machine actually has; otherwise EDITOR, otherwise vi. Skipping a candidate
+# that isn't installed keeps a shared dotfile working on a machine without it.
+# Values may carry arguments ("code -w") — only the command has to exist.
+EDITOR_ARGV=()
+resolve_editor() {
+  local candidate parts=()
+  for candidate in "${MARKDOWN_EDITOR:-}" "${EDITOR:-}" vi; do
+    [ -n "${candidate}" ] || continue
+    read -r -a parts <<< "${candidate}"
+    [ "${#parts[@]}" -gt 0 ] || continue
+    if command -v "${parts[0]}" >/dev/null 2>&1; then
+      EDITOR_ARGV=("${parts[@]}")
+      return 0
+    fi
+  done
+  die "no editor found (set MARKDOWN_EDITOR or EDITOR)"
+}
+
 create_board() { # scaffolds the board at $BOARD
   mkdir -p "${BOARD}/todo" "${BOARD}/doing" "${BOARD}/done"
   for c in todo doing "done"; do
@@ -413,7 +434,8 @@ case "${cmd}" in
     ;;
   edit)
     file="$(find_task "${1:?usage: amd edit <ref>}")"
-    "${EDITOR:-vi}" "${file}"
+    resolve_editor
+    "${EDITOR_ARGV[@]}" "${file}"
     ;;
   *) die "unknown command '${cmd}' (try: amd help)" ;;
 esac

@@ -31,7 +31,7 @@ amd start 1                       # todo  -> doing
 amd done  1                       # doing -> done
 amd back  1                       # move one column left
 amd show  publish                 # print a task (id or slug substring)
-amd edit  1                       # open in $EDITOR
+amd edit  1                       # open in $MARKDOWN_EDITOR
 amd set   1 priority low          # change a field on an existing task
 amd archive 1                     # off the board, into tasks/archive/
 amd clean                         # delete the archive for good
@@ -39,6 +39,18 @@ amd clean                         # delete the archive for good
 
 `amd` works from any subdirectory — it resolves the board from the repo root.
 Set `AMD_DIR` to use a board directory other than `tasks`.
+
+Tasks are markdown, so `amd edit` prefers `$MARKDOWN_EDITOR` over `$EDITOR`,
+and falls back to `vi`:
+
+```bash
+export MARKDOWN_EDITOR="obsidian"   # or "code --wait", "typora", …
+```
+
+A candidate is skipped when it's unset, empty, or names a command this machine
+hasn't got — so `MARKDOWN_EDITOR` set in a dotfile you share between machines
+quietly falls back to `$EDITOR` on the ones without it. Arguments are allowed;
+only the command itself has to exist.
 
 ## Priority and repository
 
@@ -136,7 +148,7 @@ tags: [release]
 | `tags` | `-t` (repeatable) | Comma-separated inside `[]`, e.g. `tags: [release,ci]`; empty as `tags: []`. |
 
 `amd set <ref> priority|repository <value>` rewrites those two fields in place;
-everything else is yours to edit — `amd edit <ref>` opens the file in `$EDITOR`,
+everything else is yours to edit — `amd edit <ref>` opens the file in your editor,
 and the `## Notes` / `## Checklist` headings are only a starting point.
 
 Nothing outside the frontmatter is parsed, so a task can grow whatever body it
