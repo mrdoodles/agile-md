@@ -30,12 +30,24 @@ audit trail** (moves are `git mv`), tasks are self-describing markdown.
   zero-padded — a stable id and a default ordering.
 - `find_task <ref>` resolves a numeric id or a unique slug substring to one file
   (errors on 0 or >1 matches).
+- Frontmatter carries `repository` and `priority`. `list_column` builds
+  `rank<TAB>id<TAB>line` rows so one `sort` serves both orderings (`-s
+  id|priority`), then `cut`s the keys back off; `repo_matches` filters on a
+  case-insensitive substring of `repository`. Unset/unknown priorities rank
+  last, so boards predating the fields still list and sort — don't "fix" that
+  by defaulting them to medium at read time.
+- `set_field` rewrites one frontmatter key, inserting it before the closing
+  `---` when the task predates it. Anything that can `die` must be assigned to
+  a variable first (`p="$(priority_of "$x")"`) — a `die` inside a substitution
+  used directly as an argument only kills the subshell, and the caller happily
+  proceeds with an empty string.
 - `move()` uses `git mv` for tracked files (history follows the rename), else
   plain `mv`. It does **not** commit — the user commits the move.
 - `ensure_board()` runs before any board-requiring command: if there's no board,
   it prompts to create one when interactive (`[ -t 0 ]`), auto-creates when
   `AMD_YES=1`, and otherwise errors (never hangs non-interactively).
-- Env vars: `AMD_DIR` (board dir name, default `tasks`), `AMD_YES` (force-create).
+- Env vars: `AMD_DIR` (board dir name, default `tasks`), `AMD_YES` (force-create),
+  `AMD_SORT` (default ordering, `id` or `priority`).
 
 ## Commands
 

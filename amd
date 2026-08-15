@@ -7,21 +7,36 @@
 # current directory — so `amd` works in any git repository.
 #
 #   amd init                          create the board in this repository
-#   amd new "<title>" [-t tag ...]    create a task in todo/
-#   amd board                         show all columns (default)
-#   amd ls [todo|doing|done|all]      list a column
+#   amd new "<title>" [options]       create a task in todo/
+#   amd board [filters]               show all columns (default)
+#   amd ls [todo|doing|done|all] [filters]
 #   amd start <ref>                   todo  -> doing
 #   amd done  <ref>                   doing -> done
 #   amd back  <ref>                   move a task one column left
 #   amd show  <ref>                   print a task
 #   amd edit  <ref>                   open a task in $EDITOR
+#   amd set   <ref> <field> <value>   set priority or repository on a task
+#
+# Options for `new`:  -t <tag> (repeatable), -p <priority>, -r <repository>
+# Filters for `board`/`ls`:
+#   -r, --repo <substring>            only tasks whose repository matches
+#   -s, --sort id|priority            ordering (default: id)
+#
+# Priority is high, medium or low (prefixes work: -p h). A task created
+# without -r records the repository you created it in, so one board can track
+# work across several repositories and filter it back out again.
 #
 # <ref> is a task id (e.g. 7 or 007) or a unique slug substring.
-# Set AMD_DIR to use a board directory other than "tasks".
+# Set AMD_DIR to use a board directory other than "tasks", AMD_SORT to change
+# the default ordering.
 #
 set -euo pipefail
 
 COLUMNS=(todo doing "done")
+
+# Set by parse_filters(); declared here so `set -u` is safe everywhere.
+FILTER_REPO=""
+SORT="${AMD_SORT:-id}"
 
 die() { printf 'amd: %s\n' "$*" >&2; exit 1; }
 
@@ -41,6 +56,63 @@ slugify() {
 meta() { awk -F'"' -v k="$2" 'index($0, k": ")==1 {print $2; exit}' "$1"; }
 
 column_of() { basename "$(dirname "$1")"; }
+
+lower() { printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]'; }
+
+# Priorities are words in the file and ranks when sorting. Anything unset or
+# unrecognised ranks last, so boards written before priorities existed still
+# sort sensibly.
+priority_rank() {
+  case "$(lower "${1:-}")" in
+    high) printf '1' ;;
+    medium) printf '2' ;;
+    low) printf '3' ;;
+    *) printf '4' ;;
+  esac
+}
+
+priority_of() { # <level-or-prefix> -> canonical level
+  case "$(lower "${1:-}")" in
+    h|hi|high) printf 'high' ;;
+    m|med|medium) printf 'medium' ;;
+    l|lo|low) printf 'low' ;;
+    *) die "unknown priority '${1:-}' (use: high, medium, low)" ;;
+  esac
+}
+
+sort_of() { # <key> -> canonical sort key
+  case "$(lower "${1:-}")" in
+    id) printf 'id' ;;
+    p|pri|priority) printf 'priority' ;;
+    *) die "unknown sort '${1:-}' (use: id, priority)" ;;
+  esac
+}
+
+# The repository a task belongs to, defaulting to the one you're standing in:
+# owner/name from the origin remote, else the repo directory's name.
+default_repo() {
+  local url base name rest root
+  url="$(git config --get remote.origin.url 2>/dev/null || true)"
+  if [ -n "${url}" ]; then
+    base="${url%.git}"; base="${base%/}"
+    name="${base##*/}"; rest="${base%/*}"
+    printf '%s/%s' "${rest##*[:/]}" "${name}"
+    return 0
+  fi
+  root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+  if [ -n "${root}" ]; then printf '%s' "$(basename "${root}")"; fi
+}
+
+# Substring, case-insensitive — the same forgiving matching as a task <ref>.
+repo_matches() { # <task-repository>
+  local have want
+  [ -n "${FILTER_REPO}" ] || return 0
+  have="$(lower "${1:-}")"; want="$(lower "${FILTER_REPO}")"
+  case "${have}" in
+    *"${want}"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
 
 next_id() {
   local max=0 n f c
@@ -84,16 +156,44 @@ move() { # <file> <dest-column>
   printf 'moved %s -> %s/\n' "$(basename "${src}")" "${col}"
 }
 
+set_field() { # <file> <key> <value> — replace the key in the frontmatter, or add it
+  local file="$1" key="$2" value="$3" tmp first=""
+  tmp="${file}.amd.tmp"
+  IFS= read -r first < "${file}" || true
+  [ "${first}" = "---" ] || die "$(basename "${file}") has no frontmatter to set ${key} in"
+  awk -v k="${key}" -v v="${value}" '
+    NR == 1 { print; next }
+    !set && index($0, k": ") == 1 { printf "%s: \"%s\"\n", k, v; set = 1; next }
+    !set && $0 == "---" { printf "%s: \"%s\"\n", k, v; set = 1; print; next }
+    { print }
+  ' "${file}" > "${tmp}"
+  mv "${tmp}" "${file}"
+  printf '%s: %s -> %s\n' "$(basename "${file}" .md)" "${key}" "${value}"
+}
+
+# Rows are built as "rank<TAB>id<TAB>line" so one `sort` handles both orderings;
+# the keys are cut back off before printing.
 list_column() {
-  local c="$1" f id title found=0
+  local c="$1" f id idnum title pri repo line rows=() keys=()
   printf '\n%s\n' "$(printf '%s' "${c}" | tr '[:lower:]' '[:upper:]')"
   for f in "${BOARD}/${c}"/*.md; do
     [ -e "${f}" ] || continue
-    found=1
-    id="$(meta "${f}" id)"; title="$(meta "${f}" title)"
-    printf '  [%s] %s\n' "${id:-???}" "${title:-$(basename "${f}" .md)}"
+    repo="$(meta "${f}" repository)"
+    repo_matches "${repo}" || continue
+    id="$(meta "${f}" id)"; title="$(meta "${f}" title)"; pri="$(meta "${f}" priority)"
+    idnum="$(basename "${f}" | sed -E 's/^0*([0-9]+)-.*/\1/')"
+    if ! [[ "${idnum}" =~ ^[0-9]+$ ]]; then idnum=999999; fi
+    line="$(printf '  [%s] %-7s%s' "${id:-???}" "$(lower "${pri:--}")" \
+      "${title:-$(basename "${f}" .md)}")"
+    if [ -n "${repo}" ]; then line="${line}  @${repo}"; fi
+    rows+=("$(priority_rank "${pri}")"$'\t'"${idnum}"$'\t'"${line}")
   done
-  if [ "${found}" -eq 0 ]; then printf '  (empty)\n'; fi
+  if [ "${#rows[@]}" -eq 0 ]; then printf '  (empty)\n'; return 0; fi
+  case "${SORT}" in
+    priority) keys=(-t $'\t' "-k1,1n" "-k2,2n") ;;
+    *) keys=(-t $'\t' "-k2,2n") ;;
+  esac
+  printf '%s\n' "${rows[@]}" | sort "${keys[@]}" | cut -f3-
 }
 
 create_board() { # scaffolds the board at $BOARD
@@ -126,6 +226,27 @@ ensure_board() {
   esac
 }
 
+# Shared by `board` and `ls`: sets FILTER_REPO, SORT and TARGET.
+parse_filters() {
+  TARGET="all"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -r|--repo|--repository)
+        [ $# -ge 2 ] || die "$1 needs a repository"
+        FILTER_REPO="$2"; shift 2 ;;
+      -s|--sort)
+        [ $# -ge 2 ] || die "$1 needs a sort key (id, priority)"
+        SORT="$(sort_of "$2")"; shift 2 ;;
+      -*) die "unknown option '$1' (try: amd help)" ;;
+      *) TARGET="$1"; shift ;;
+    esac
+  done
+  case "${TARGET}" in
+    all|todo|doing|"done") ;;
+    *) die "unknown column '${TARGET}' (use: todo, doing, done, all)" ;;
+  esac
+}
+
 usage() { awk 'NR>=3 && /^#/ {sub(/^# ?/, ""); print; next} NR>=3 {exit}' "${BASH_SOURCE[0]}"; }
 
 cmd="${1:-board}"; [ $# -gt 0 ] && shift || true
@@ -143,36 +264,59 @@ ensure_board
 
 case "${cmd}" in
   new)
-    title="${1:-}"; [ -n "${title}" ] || die 'usage: amd new "<title>" [-t tag ...]'
+    title="${1:-}"
+    [ -n "${title}" ] || die 'usage: amd new "<title>" [-t tag ...] [-p priority] [-r repository]'
     shift
-    tags=()
+    tags=(); priority="medium"; repo=""
     while [ $# -gt 0 ]; do
-      case "$1" in -t|--tag) tags+=("$2"); shift 2 ;; *) shift ;; esac
+      case "$1" in
+        -t|--tag) [ $# -ge 2 ] || die "$1 needs a tag"; tags+=("$2"); shift 2 ;;
+        -p|--priority)
+          [ $# -ge 2 ] || die "$1 needs a priority (high, medium, low)"
+          priority="$(priority_of "$2")"; shift 2 ;;
+        -r|--repo|--repository)
+          [ $# -ge 2 ] || die "$1 needs a repository"
+          repo="$2"; shift 2 ;;
+        *) die "unexpected argument '$1' (try: amd help)" ;;
+      esac
     done
+    [ -n "${repo}" ] || repo="$(default_repo)"
     id="$(next_id)"; slug="$(slugify "${title}")"
     file="${BOARD}/todo/${id}-${slug}.md"
     taglist=""
-    [ "${#tags[@]}" -gt 0 ] && taglist="$(IFS=,; printf '%s' "${tags[*]}")"
+    if [ "${#tags[@]}" -gt 0 ]; then taglist="$(IFS=,; printf '%s' "${tags[*]}")"; fi
     {
       printf -- '---\n'
       printf 'id: "%s"\n' "${id}"
       printf 'title: "%s"\n' "${title}"
+      printf 'repository: "%s"\n' "${repo}"
+      printf 'priority: "%s"\n' "${priority}"
       printf 'created: "%s"\n' "$(date +%F)"
       printf 'tags: [%s]\n' "${taglist}"
       printf -- '---\n\n## Notes\n\n\n## Checklist\n\n- [ ] \n'
     } > "${file}"
     printf 'created todo/%s-%s.md\n' "${id}" "${slug}"
     ;;
-  board)
-    for c in "${COLUMNS[@]}"; do list_column "${c}"; done
-    ;;
-  ls|list)
-    target="${1:-all}"
-    if [ "${target}" = "all" ]; then
+  board|ls|list)
+    parse_filters "$@"
+    if [ "${TARGET}" = "all" ]; then
       for c in "${COLUMNS[@]}"; do list_column "${c}"; done
     else
-      list_column "${target}"
+      list_column "${TARGET}"
     fi
+    ;;
+  set)
+    ref="${1:?usage: amd set <ref> <priority|repository> <value>}"
+    field="${2:?usage: amd set <ref> <priority|repository> <value>}"
+    value="${3:?usage: amd set <ref> <priority|repository> <value>}"
+    file="$(find_task "${ref}")"
+    case "$(lower "${field}")" in
+      # Assign first: a `die` inside a substitution used as an argument would
+      # leave the field set to the empty string.
+      p|pri|priority) level="$(priority_of "${value}")"; set_field "${file}" priority "${level}" ;;
+      r|repo|repository) set_field "${file}" repository "${value}" ;;
+      *) die "unknown field '${field}' (use: priority, repository)" ;;
+    esac
     ;;
   start) move "$(find_task "${1:?usage: amd start <ref>}")" doing ;;
   done)  move "$(find_task "${1:?usage: amd done <ref>}")" "done" ;;
