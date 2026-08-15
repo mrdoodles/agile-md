@@ -25,19 +25,40 @@ In any git repository:
 
 ```bash
 amd init                          # scaffold tasks/{todo,doing,done} here
-amd new "Publish to Marketplace" -t release
+amd new "Publish to Marketplace" -t release -p high
 amd board                         # show all columns (the default)
 amd start 1                       # todo  -> doing
 amd done  1                       # doing -> done
 amd back  1                       # move one column left
 amd show  publish                 # print a task (id or slug substring)
 amd edit  1                       # open in $EDITOR
+amd set   1 priority low          # change a field on an existing task
 amd archive 1                     # off the board, into tasks/archive/
 amd clean                         # delete the archive for good
 ```
 
 `amd` works from any subdirectory — it resolves the board from the repo root.
 Set `AMD_DIR` to use a board directory other than `tasks`.
+
+## Priority and repository
+
+Every task records a `priority` (`high`, `medium` or `low` — default `medium`)
+and the `repository` it belongs to. The repository defaults to the one you
+created the task in (`owner/name`, read from the `origin` remote), so a single
+board can track work across several repositories and filter it back apart:
+
+```bash
+amd new "Fix the release job" -p high -r mrdoodles/lite-actions
+amd set 7 priority low            # or: amd set 7 repository mrdoodles/agile-md
+amd board -s priority             # highest first, ties broken by id
+amd board -r lite-actions         # only that repository (substring, any case)
+amd ls todo -r lite-actions -s priority
+```
+
+Ordering is by id unless you ask for `-s priority`; set `AMD_SORT=priority` to
+make that the default. Tasks written before these fields existed keep working —
+they show a `-` for priority, sort last under `-s priority`, and `amd set` adds
+the missing field to the frontmatter.
 
 ## Archive
 
@@ -78,13 +99,22 @@ hanging; set `AMD_YES=1` to create the board without prompting.
 
 ## Task format
 
-Each task is `tasks/todo/NNN-slug.md` with light frontmatter:
+Each task is `tasks/<column>/NNN-slug.md` — the `NNN` id and the slug come from
+the title, the column is the directory. This is exactly what
+
+```bash
+amd new "Publish to Marketplace" -t release -p high
+```
+
+writes to `tasks/todo/001-publish-to-marketplace.md`:
 
 ```markdown
 ---
 id: "001"
 title: "Publish to Marketplace"
-created: "2026-08-01"
+repository: "mrdoodles/agile-md"
+priority: "high"
+created: "2026-08-13"
 tags: [release]
 ---
 
@@ -96,9 +126,27 @@ tags: [release]
 - [ ]
 ```
 
-The `NNN` id is assigned in creation order and gives a stable default ordering.
-Commit task moves like any other change — the `git mv` is the record of the
-transition. Tasks can reference each other with `[[NNN-slug]]` wikilinks.
+| Field | Set by | Notes |
+| --- | --- | --- |
+| `id` | `amd new` | Zero-padded, one higher than the largest id on the board. Never changes — it's how `<ref>` and `[[NNN-slug]]` wikilinks find a task. |
+| `title` | `amd new "<title>"` | Verbatim; also slugified into the filename. |
+| `repository` | `-r`, or the `origin` remote | `owner/name` from `git remote get-url origin`, falling back to the repository directory's name. What `amd board -r` filters on. |
+| `priority` | `-p`, default `medium` | `high`, `medium` or `low`. What `amd board -s priority` orders by. |
+| `created` | `amd new` | `YYYY-MM-DD`, the day it was created. |
+| `tags` | `-t` (repeatable) | Comma-separated inside `[]`, e.g. `tags: [release,ci]`; empty as `tags: []`. |
+
+`amd set <ref> priority|repository <value>` rewrites those two fields in place;
+everything else is yours to edit — `amd edit <ref>` opens the file in `$EDITOR`,
+and the `## Notes` / `## Checklist` headings are only a starting point.
+
+Nothing outside the frontmatter is parsed, so a task can grow whatever body it
+needs. Missing fields are tolerated: tasks written before `repository` and
+`priority` existed still list and sort (last, under `-s priority`), and
+`amd set` adds the field when it isn't there.
+
+The id gives a stable default ordering. Commit task moves like any other change
+— the `git mv` is the record of the transition. Tasks can reference each other
+with `[[NNN-slug]]` wikilinks.
 
 ## Why a directory instead of one big TODO.md?
 
