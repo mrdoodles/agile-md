@@ -23,7 +23,8 @@ git init -q; git config user.email t@t.co; git config user.name t
 
 echo "init:"
 bash "${AMD}" init >/dev/null
-assert "init creates todo/doing/done" test -d tasks/todo -a -d tasks/doing -a -d tasks/done
+assert "init creates backlog/todo/doing/done" \
+  test -d tasks/backlog -a -d tasks/todo -a -d tasks/doing -a -d tasks/done
 assert "init creates an archive that keeps itself out of git" \
   bash -c "test -f tasks/archive/.gitignore && grep -q '^\*$' tasks/archive/.gitignore"
 
@@ -36,15 +37,23 @@ echo "create:"
 bash "${AMD}" new "First task" >/dev/null
 bash "${AMD}" new "Second task" -t x -t y >/dev/null
 git add -A; git commit -qm seed
-assert "creates tasks/todo/001-first-task.md" test -f tasks/todo/001-first-task.md
-assert "title in frontmatter" grep -q '^title: "First task"$' tasks/todo/001-first-task.md
-assert "tags in frontmatter" grep -q '^tags: \[x,y\]$' tasks/todo/002-second-task.md
+assert "creates tasks/backlog/001-first-task.md" test -f tasks/backlog/001-first-task.md
+assert "title in frontmatter" grep -q '^title: "First task"$' tasks/backlog/001-first-task.md
+assert "tags in frontmatter" grep -q '^tags: \[x,y\]$' tasks/backlog/002-second-task.md
 
 echo "board:"
-assert "board shows all three columns" \
-  bash -c "bash '${AMD}' board | grep -q TODO && bash '${AMD}' board | grep -q DOING && bash '${AMD}' board | grep -q DONE"
+assert "board shows all four columns" \
+  bash -c "bash '${AMD}' board | grep -q BACKLOG && bash '${AMD}' board | grep -q TODO && bash '${AMD}' board | grep -q DOING && bash '${AMD}' board | grep -q DONE"
+
+echo "backlog:"
+assert "new tasks land in the backlog, not todo" \
+  bash -c "test -f tasks/backlog/001-first-task.md && ! test -f tasks/todo/001-first-task.md"
+assert "the backlog column lists them" \
+  bash -c "bash '${AMD}' ls backlog | grep -q 'First task'"
 
 echo "moves (git mv):"
+bash "${AMD}" todo 1 >/dev/null
+assert "todo: backlog -> todo (refined into the sprint)" test -f tasks/todo/001-first-task.md
 bash "${AMD}" doing 1 >/dev/null
 assert "doing: todo -> doing" test -f tasks/doing/001-first-task.md
 assert "the old 'start' name is gone" bash -c "! bash '${AMD}' start 1"
@@ -53,12 +62,16 @@ assert "done: doing -> done" test -f tasks/done/001-first-task.md
 assert "moved via git (rename tracked)" bash -c 'git status --porcelain | grep -q "^R"'
 bash "${AMD}" back 1 >/dev/null
 assert "back: done -> doing" test -f tasks/doing/001-first-task.md
+bash "${AMD}" back 1 >/dev/null; bash "${AMD}" back 1 >/dev/null
+assert "back walks all the way to the backlog" test -f tasks/backlog/001-first-task.md
+assert "and stops there" bash -c "! bash '${AMD}' back 1"
+bash "${AMD}" todo 1 >/dev/null; bash "${AMD}" doing 1 >/dev/null
 
 echo "refs + ids:"
 bash "${AMD}" doing second >/dev/null
 assert "find by slug substring" test -f tasks/doing/002-second-task.md
 bash "${AMD}" new "Third" >/dev/null
-assert "ids continue across columns (003)" test -f tasks/todo/003-third.md
+assert "ids continue across columns (003)" test -f tasks/backlog/003-third.md
 
 echo "edit (MARKDOWN_EDITOR, then EDITOR):"
 # Fake editors that record which one ran, and with what.
@@ -79,7 +92,7 @@ edited_by() {
   if [ -f "${bin}/ran" ]; then sed 's#[^ ]*/tasks/#tasks/#' "${bin}/ran"
   else printf 'nothing ran\n'; fi
 }
-task3="tasks/todo/003-third.md"
+task3="tasks/backlog/003-third.md"
 
 assert "MARKDOWN_EDITOR opens the task" \
   test "$(edited_by MARKDOWN_EDITOR=md-ed EDITOR=plain-ed)" = "md-ed ${task3}"
@@ -95,7 +108,7 @@ rm -rf "${bin}"
 echo "archive:"
 bash "${AMD}" new "Archive me" >/dev/null
 git add -A; git commit -qm archivable
-archived_file="$(basename tasks/todo/*-archive-me.md)"
+archived_file="$(basename tasks/backlog/*-archive-me.md)"
 archived_id="${archived_file%%-*}"
 assert "archive takes a task off the board" \
   bash -c "bash '${AMD}' archive archive-me | grep -q 'archived'"
@@ -105,14 +118,14 @@ assert "the board no longer shows it" \
 assert "ls archive still lists it" \
   bash -c "bash '${AMD}' ls archive | grep -q 'Archive me'"
 assert "git records the task leaving the board" \
-  bash -c "git status --porcelain | grep -q '^D  tasks/todo/.*archive-me'"
+  bash -c "git status --porcelain | grep -q '^D  tasks/backlog/.*archive-me'"
 assert "the archive itself stays out of git" \
   bash -c "! git status --porcelain | grep -q 'tasks/archive/0'"
 assert "an archived task is no longer findable" bash -c "! bash '${AMD}' show archive-me"
 assert "a bad ref reports once and stops" \
   bash -c "test \"\$(bash '${AMD}' show 999 2>&1 | wc -l)\" -eq 1"
 assert "ids do not go back after archiving" \
-  bash -c "bash '${AMD}' new 'After archiving' >/dev/null; ! test -f tasks/todo/${archived_id}-after-archiving.md"
+  bash -c "bash '${AMD}' new 'After archiving' >/dev/null; ! test -f tasks/backlog/${archived_id}-after-archiving.md"
 
 echo "archiving on a board that predates archive/:"
 legacy="$(mktemp -d)"
@@ -131,6 +144,9 @@ assert "and it brings its .gitignore with it" \
   bash -c "test -f tasks/archive/.gitignore && grep -q '^\*\$' tasks/archive/.gitignore"
 assert "so the archived task never becomes untracked content" \
   bash -c "! git status --porcelain --untracked-files=all | grep -q 'tasks/archive/001'"
+assert "a board with no backlog/ gains one on first use" test -d tasks/backlog
+assert "and `amd new` can write into it" \
+  bash -c "bash '${AMD}' new 'Post upgrade' >/dev/null && ls tasks/backlog/*-post-upgrade.md"
 rm -f tasks/archive/.gitignore
 assert "any command puts a deleted .gitignore back" \
   bash -c "bash '${AMD}' board >/dev/null && test -f tasks/archive/.gitignore"
@@ -164,50 +180,50 @@ fields="$(mktemp -d)"
   bash "${AMD}" new "Charlie" >/dev/null
   # a task written before these fields existed
   printf -- '---\nid: "004"\ntitle: "Legacy"\ncreated: "2026-01-01"\ntags: []\n---\n' \
-    > tasks/todo/004-legacy.md
+    > tasks/backlog/004-legacy.md
 )
 cd "${fields}" || exit 1
 # ids in listed order, so ordering is a single string comparison
 idlist() { bash "${AMD}" "$@" | sed -n 's/^  \[\([0-9]*\)\].*/\1/p' | tr -d '\n'; }
 
 assert "new records the repository from origin as owner/name" \
-  grep -q '^repository: "mrdoodles/agile-md"$' tasks/todo/001-alpha.md
+  grep -q '^repository: "mrdoodles/agile-md"$' tasks/backlog/001-alpha.md
 assert "-r overrides the repository" \
-  grep -q '^repository: "mrdoodles/lite-actions"$' tasks/todo/002-bravo.md
+  grep -q '^repository: "mrdoodles/lite-actions"$' tasks/backlog/002-bravo.md
 assert "-p sets the priority (prefixes work)" \
-  grep -q '^priority: "high"$' tasks/todo/002-bravo.md
-assert "priority defaults to medium" grep -q '^priority: "medium"$' tasks/todo/003-charlie.md
+  grep -q '^priority: "high"$' tasks/backlog/002-bravo.md
+assert "priority defaults to medium" grep -q '^priority: "medium"$' tasks/backlog/003-charlie.md
 assert "the board shows priority and repository" \
-  bash -c "bash '${AMD}' ls todo | grep -q 'high .*Bravo  @mrdoodles/lite-actions'"
+  bash -c "bash '${AMD}' ls backlog | grep -q 'high .*Bravo  @mrdoodles/lite-actions'"
 
-assert "default order is by id" test "$(idlist ls todo)" = "001002003004"
-assert "-s priority orders high, medium, low" test "$(idlist ls todo -s priority)" = "002003001004"
+assert "default order is by id" test "$(idlist ls backlog)" = "001002003004"
+assert "-s priority orders high, medium, low" test "$(idlist ls backlog -s priority)" = "002003001004"
 assert "a task with no priority sorts last" \
-  bash -c "test \"\$(bash '${AMD}' ls todo -s priority | sed -n 's/^  \[\([0-9]*\)\].*/\1/p' | tail -1)\" = 004"
+  bash -c "test \"\$(bash '${AMD}' ls backlog -s priority | sed -n 's/^  \[\([0-9]*\)\].*/\1/p' | tail -1)\" = 004"
 assert "AMD_SORT sets the default ordering" \
-  bash -c "test \"\$(AMD_SORT=priority bash '${AMD}' ls todo | sed -n 's/^  \[\([0-9]*\)\].*/\1/p' | tr -d '\n')\" = 002003001004"
+  bash -c "test \"\$(AMD_SORT=priority bash '${AMD}' ls backlog | sed -n 's/^  \[\([0-9]*\)\].*/\1/p' | tr -d '\n')\" = 002003001004"
 
-assert "-r filters to one repository" test "$(idlist ls todo -r lite-actions)" = "002"
-assert "the filter is a case-insensitive substring" test "$(idlist ls todo -r LITE)" = "002"
-assert "-r excludes tasks with no repository" test "$(idlist ls todo -r agile-md)" = "001003"
+assert "-r filters to one repository" test "$(idlist ls backlog -r lite-actions)" = "002"
+assert "the filter is a case-insensitive substring" test "$(idlist ls backlog -r LITE)" = "002"
+assert "-r excludes tasks with no repository" test "$(idlist ls backlog -r agile-md)" = "001003"
 assert "a filter that matches nothing leaves the column empty" \
-  bash -c "bash '${AMD}' ls todo -r nothing-here | grep -q '(empty)'"
+  bash -c "bash '${AMD}' ls backlog -r nothing-here | grep -q '(empty)'"
 assert "board takes the same filters" test "$(idlist board -r lite-actions)" = "002"
 
 assert "set updates a priority" bash -c "bash '${AMD}' set 1 priority high | grep -q 'priority -> high'"
-assert "and the file says so" grep -q '^priority: "high"$' tasks/todo/001-alpha.md
+assert "and the file says so" grep -q '^priority: "high"$' tasks/backlog/001-alpha.md
 assert "set adds a field a legacy task never had" \
-  bash -c "bash '${AMD}' set 4 repository other/proj >/dev/null && grep -q '^repository: \"other/proj\"\$' tasks/todo/004-legacy.md"
+  bash -c "bash '${AMD}' set 4 repository other/proj >/dev/null && grep -q '^repository: \"other/proj\"\$' tasks/backlog/004-legacy.md"
 assert "the added field stays inside the frontmatter" \
-  bash -c "test \"\$(grep -c -- '^---\$' tasks/todo/004-legacy.md)\" -eq 2"
-assert "set leaves no temporary files behind" bash -c "! ls tasks/todo/*.tmp"
+  bash -c "test \"\$(grep -c -- '^---\$' tasks/backlog/004-legacy.md)\" -eq 2"
+assert "set leaves no temporary files behind" bash -c "! ls tasks/backlog/*.tmp"
 assert "set rejects an unknown field" bash -c "! bash '${AMD}' set 1 colour red"
 assert "set rejects an unknown priority" bash -c "! bash '${AMD}' set 1 priority urgent"
-assert "and leaves the priority alone when it does" grep -q '^priority: "high"$' tasks/todo/001-alpha.md
+assert "and leaves the priority alone when it does" grep -q '^priority: "high"$' tasks/backlog/001-alpha.md
 assert "new rejects an unknown priority" bash -c "! bash '${AMD}' new 'Nope' -p urgent"
-assert "an unknown sort is an error" bash -c "! bash '${AMD}' ls todo -s alphabetical"
+assert "an unknown sort is an error" bash -c "! bash '${AMD}' ls backlog -s alphabetical"
 assert "an unknown column is an error" bash -c "! bash '${AMD}' ls sideways"
-assert "an option with no value is an error" bash -c "! bash '${AMD}' ls todo -r"
+assert "an option with no value is an error" bash -c "! bash '${AMD}' ls backlog -r"
 cd "${tmp}" || exit 1
 rm -rf "${fields}"
 

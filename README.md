@@ -1,7 +1,8 @@
 # agile-md
 
-A tiny **filesystem Kanban** — tasks are markdown files moved between `todo/`,
-`doing/` and `done/` directories. Pure `bash` + `git`, no JavaScript, no runtime.
+A tiny **filesystem Kanban** — tasks are markdown files moved between `backlog/`,
+`todo/`, `doing/` and `done/` directories. Pure `bash` + `git`, no JavaScript,
+no runtime.
 
 - **Status is the folder.** A task's column is simply which directory it's in.
 - **Git is the audit trail.** Moving a task is a `git mv`, so `git log --follow`
@@ -40,9 +41,10 @@ configuration. To scope it to one project instead, copy the same file to
 In any git repository:
 
 ```bash
-amd init                          # scaffold tasks/{todo,doing,done} here
+amd init                          # scaffold tasks/{backlog,todo,doing,done} here
 amd new "Publish to Marketplace" -t release -p high
 amd board                         # show all columns (the default)
+amd todo  1                       # backlog -> todo (pull into the sprint)
 amd doing 1                       # todo  -> doing
 amd done  1                       # doing -> done
 amd back  1                       # move one column left
@@ -68,6 +70,26 @@ hasn't got — so `MARKDOWN_EDITOR` set in a dotfile you share between machines
 quietly falls back to `$EDITOR` on the ones without it. Arguments are allowed;
 only the command itself has to exist.
 
+## Backlog, refinement and sprints
+
+New tasks land in `backlog/`, not `todo/`. The backlog is everything you might
+do; `todo/` is what you've committed to doing now. Refinement is moving a task
+between them:
+
+```bash
+amd new "Fix the release job"     # -> backlog/, unrefined
+amd ls backlog -s priority        # what's worth pulling next
+amd todo 7                        # pull it into the sprint
+amd back 7                        # changed your mind — back to the backlog
+```
+
+That keeps `amd board` honest. Without a backlog, `todo/` collects every idea
+anyone ever had and stops meaning anything; with one, the size of `todo/` is
+the size of your commitment.
+
+Nothing forces you to use it — `amd doing 7` straight from the backlog works
+if a task needs no refinement.
+
 ## Priority and repository
 
 Every task records a `priority` (`high`, `medium` or `low` — default `medium`)
@@ -80,7 +102,7 @@ amd new "Fix the release job" -p high -r mrdoodles/lite-actions
 amd set 7 priority low            # or: amd set 7 repository mrdoodles/agile-md
 amd board -s priority             # highest first, ties broken by id
 amd board -r lite-actions         # only that repository (substring, any case)
-amd ls todo -r lite-actions -s priority
+amd ls backlog -r lite-actions -s priority
 ```
 
 Ordering is by id unless you ask for `-s priority`; set `AMD_SORT=priority` to
@@ -95,7 +117,7 @@ never really tasks. `amd archive <ref>` takes one off the board without
 deleting it:
 
 ```bash
-amd archive 4                     # tasks/todo/004-… -> tasks/archive/004-…
+amd archive 4                     # tasks/backlog/004-… -> tasks/archive/004-…
 amd ls archive                    # the only view that shows them
 amd clean                         # delete everything in archive/, permanently
 ```
@@ -134,7 +156,7 @@ the title, the column is the directory. This is exactly what
 amd new "Publish to Marketplace" -t release -p high
 ```
 
-writes to `tasks/todo/001-publish-to-marketplace.md`:
+writes to `tasks/backlog/001-publish-to-marketplace.md`:
 
 ```markdown
 ---
