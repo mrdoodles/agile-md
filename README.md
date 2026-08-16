@@ -13,7 +13,7 @@ no runtime.
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mrdoodles/agile-md/v4/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/mrdoodles/agile-md/v5/install.sh | bash
 ```
 
 Installs the `amd` command to `/usr/local/bin` when it's writable, otherwise
