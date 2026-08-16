@@ -2,20 +2,23 @@
 name: agile-md
 description: >-
   Working a filesystem Kanban board managed by the `amd` command — creating,
-  moving, archiving and writing tickets under `tasks/{todo,doing,done}`. Load
-  whenever asked to raise a ticket, capture work for later, move something to
-  doing/done, or edit a task markdown file, in any repo that has a `tasks/`
-  board. Covers the process an agent must follow rather than the CLI's
-  internals: create with `amd new` (never hand-write filenames), write bodies
-  directly but preserve frontmatter, `amd set` for the owned fields, why
-  `amd edit` is unusable unattended, and what commits versus what doesn't.
+  refining, moving, archiving and writing tickets under
+  `tasks/{backlog,todo,doing,done}`. Load whenever asked to raise a ticket,
+  capture work for later, refine a backlog, move something to todo/doing/done,
+  or edit a task markdown file, in any repo that has a `tasks/` board. Covers
+  the process an agent must follow rather than the CLI's internals: new
+  tickets land in the backlog, create with `amd new` (never hand-write
+  filenames), write bodies directly but preserve frontmatter, `amd set` for
+  the owned fields, why `amd edit` is unusable unattended, and what commits
+  versus what doesn't.
 ---
 
 # Working an agile-md board
 
 `amd` is a filesystem Kanban: a ticket is a markdown file, its status is which
 directory it sits in, and moves are `git mv` so the history is the audit trail.
-The board lives at `<repo-root>/tasks/` in whatever repo you are working in.
+The board lives at `<repo-root>/tasks/` in whatever repo you are working in,
+with columns `backlog/ todo/ doing/ done/` plus an ignored `archive/`.
 
 Run `amd help` first if unsure — it is the authority on the current command set,
 which grows. This file is about *process*: the parts that go wrong silently.
@@ -26,7 +29,13 @@ which grows. This file is about *process*: the parts that go wrong silently.
 amd new "Validate conventional commits in CI" -p medium -t ci -t lite-actions
 ```
 
-Writing `tasks/todo/013-something.md` yourself is the single most damaging
+New tickets land in **`backlog/`**, not `todo/` — the backlog is everything
+that might be done, `todo/` is what has been committed to. Raising a ticket
+never adds to the current workload, so capture freely; promoting is a separate,
+deliberate act (`amd todo <ref>`). Do not promote something just because you
+created it — leave that call to the user unless they asked for it.
+
+Writing `tasks/backlog/013-something.md` yourself is the single most damaging
 shortcut available, because ids must be unique *forever*:
 
 - `next_id` counts `archive/` as well as the live columns. An archived ticket
@@ -46,7 +55,7 @@ but replace *only* what is below the closing `---`:
 
 ```bash
 setbody() { f="$1"; head -8 "$f" > /tmp/t && cat >> /tmp/t && mv /tmp/t "$f"; }
-setbody tasks/todo/013-slug.md <<'EOF'
+setbody tasks/backlog/013-slug.md <<'EOF'
 
 ## Notes
 
@@ -64,7 +73,7 @@ and the ticket lists as `[???]` with no title, at display time, long after the
 write. Check afterwards:
 
 ```bash
-grep -c '^---$' tasks/todo/013-slug.md    # must be 2
+grep -c '^---$' tasks/backlog/013-slug.md    # must be 2
 ```
 
 ## Use `amd set` for the two fields `amd` owns
@@ -85,10 +94,14 @@ file directly instead (above). Only suggest `amd edit` to a human.
 ## Moves are `git mv`, and they do not commit
 
 ```bash
-amd doing 13     # todo  -> doing
-amd done  13     # doing -> done
-amd back  13     # one column left
+amd todo  13     # backlog -> todo   (refined, pulled into the sprint)
+amd doing 13     # todo    -> doing
+amd done  13     # doing   -> done
+amd back  13     # one column left, stopping at backlog
 ```
+
+Each command is named for the column it moves the ticket *into*. Columns can be
+skipped (`amd doing 13` straight from the backlog works) but say so if you do.
 
 For a ticket git already tracks, this is a `git mv`: the rename is staged and
 `git log --follow` reconstructs when the work started and finished. For one
@@ -126,7 +139,8 @@ become committable.
 amd board                          # all columns, ordered by id
 amd board -s priority              # high first, ties broken by id
 amd board -r lite-actions          # one repository (case-insensitive substring)
-amd ls todo -r agile-md -s priority
+amd ls backlog -s priority         # what is worth refining next
+amd ls todo -r agile-md            # what is actually committed to
 ```
 
 One board can hold work for several repositories; `repository` is what
