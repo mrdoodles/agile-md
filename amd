@@ -169,6 +169,18 @@ next_id() {
   printf '%03d' "${next}"
 }
 
+# Seed the counter on a board that predates it, from the high-water mark on
+# disk. Runs before every command, so a board adopts the counter the first time
+# it is touched rather than on the first `new` — which matters, because ids
+# deleted in between would otherwise be handed out again.
+ensure_counter() {
+  local high
+  if [ ! -e "${BOARD}/${COUNTER}" ]; then
+    high="$(highest_id)"
+    printf '%s\n' "$((high + 1))" > "${BOARD}/${COUNTER}"
+  fi
+}
+
 record_id() { # <id> — the counter only ever moves forward
   local id="$1" stored next
   next=$((10#${id} + 1))
@@ -334,7 +346,7 @@ ensure_columns() {
 create_board() { # scaffolds the board at $BOARD
   ensure_columns
   ensure_archive
-  [ -e "${BOARD}/${COUNTER}" ] || printf '1\n' > "${BOARD}/${COUNTER}"
+  ensure_counter
   if [ ! -e "${BOARD}/README.md" ]; then
     printf '# Tasks (agile-md)\n\nA filesystem Kanban managed by the `amd` command.\nStatus is the folder; `git mv` between columns is the audit trail.\nSee https://github.com/mrdoodles/agile-md\n' > "${BOARD}/README.md"
   fi
@@ -347,7 +359,7 @@ ensure_board() {
   # Every command repairs a missing archive/.gitignore on the way past: losing
   # it is how archived tasks would quietly get committed, and the check costs
   # one stat on a board that's already fine.
-  if [ -d "${BOARD}" ]; then ensure_columns; ensure_archive; return 0; fi
+  if [ -d "${BOARD}" ]; then ensure_columns; ensure_archive; ensure_counter; return 0; fi
   local reply=""
   if [ "${AMD_YES:-}" = "1" ]; then
     reply=y

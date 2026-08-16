@@ -200,6 +200,9 @@ together with the highest id on disk — whichever is higher wins. That way an i
 is never reused even if you delete a task outright, and deleting the counter
 costs you nothing but those freed ids. Commit it along with the board.
 
+Boards created before the counter existed need no migration: the first `amd`
+command of any kind seeds it from the highest id already on the board.
+
 The id gives a stable default ordering. Commit task moves like any other change
 — the `git mv` is the record of the transition. Tasks can reference each other
 with `[[NNN-slug]]` wikilinks.

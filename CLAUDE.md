@@ -39,7 +39,12 @@ audit trail** (moves are `git mv`), tasks are self-describing markdown.
   than archived; the max-with-disk fallback is what stops a lost, stale or
   badly merged counter from reissuing an id that is still in use. Losing
   `.next-id` costs only the deleted ids. `record_id` advances it after `new`
-  and only ever forwards. Arithmetic on a padded id needs `$((10#${id}))` —
+  and only ever forwards; `ensure_counter` seeds it from the high-water mark on
+  boards that predate it, from `ensure_board` — so adoption happens on the first
+  command of any kind, not the first `new`, closing the window where a task
+  deleted in between would have its id reissued. No migration script is needed
+  or possible: `install.sh` installs a global command and cannot know which
+  repos have boards. Arithmetic on a padded id needs `$((10#${id}))` —
   `$((008))` is an octal error — but `highest_id`'s sed already strips the
   padding, and `10#` does not work inside `[ ]` at all.
 - `find_task <ref>` resolves a numeric id or a unique slug substring to one file

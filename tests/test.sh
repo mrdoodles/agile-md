@@ -267,6 +267,30 @@ assert "archived ids still hold" \
 cd "${tmp}" || exit 1
 rm -rf "${ids}"
 
+echo "adopting the counter on a board that predates it:"
+pre="$(mktemp -d)"
+(
+  cd "${pre}" || exit 1
+  git init -q; git config user.email t@t.co; git config user.name t
+  mkdir -p tasks/backlog tasks/todo tasks/doing tasks/done
+  for n in 1 2 3 4 5; do
+    printf -- '---\nid: "00%s"\ntitle: "Old %s"\ncreated: "2026-01-01"\ntags: []\n---\n' \
+      "${n}" "${n}" > "tasks/todo/00${n}-old-${n}.md"
+  done
+)
+cd "${pre}" || exit 1
+assert "no counter to begin with" bash -c "! test -e tasks/.next-id"
+bash "${AMD}" board >/dev/null
+assert "any command seeds it from the high-water mark" \
+  bash -c "test \"\$(cat tasks/.next-id)\" = 6"
+# Seeding on read, not on `new`, is what closes this window: delete the highest
+# task before creating anything and its id must still not come back.
+rm tasks/todo/005-old-5.md
+bash "${AMD}" new "Next one" >/dev/null
+assert "an id deleted after adoption is not reissued" test -f tasks/backlog/006-next-one.md
+cd "${tmp}" || exit 1
+rm -rf "${pre}"
+
 echo "guards:"
 assert "errors outside a git repository" \
   bash -c "cd '${nongit}' && ! bash '${AMD}' board"
