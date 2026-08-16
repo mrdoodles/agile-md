@@ -5,8 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Scope
 
 `agile-md` is a tiny **filesystem Kanban**. The whole tool is the single bash
-script `amd`: it manages markdown task files moved between `todo/`, `doing/` and
-`done/` directories. Board data lives in each *consuming* repo at
+script `amd`: it manages markdown task files moved between `backlog/`, `todo/`,
+`doing/` and `done/` directories. Board data lives in each *consuming* repo at
 `<repo-root>/tasks/`; the `amd` command is installed globally and operates on
 whatever repo you're in. Pure `bash` + `git` — no JavaScript, no runtime, no
 dependencies. Design principles: **status is the folder**, **git history is the
@@ -50,6 +50,13 @@ audit trail** (moves are `git mv`), tasks are self-describing markdown.
   proceeds with an empty string.
 - `move()` uses `git mv` for tracked files (history follows the rename), else
   plain `mv`. It does **not** commit — the user commits the move.
+- `COLUMNS` is ordered left to right and is the single source of column truth:
+  `new` writes into the first (`backlog`), `back` walks it in reverse, and
+  `next_id`/`find_task`/`list_column` iterate it. Adding a column means editing
+  that array, `back`'s case, `parse_filters`'s accepted list, and adding a move
+  command named for it. `ensure_columns` creates any missing column on every
+  command, so a board written by an older amd gains `backlog/` on first use
+  instead of `new` failing on a directory that isn't there.
 - `archive/` is the drawer: `ensure_archive` creates it *with* its `.gitignore`
   (`*` + `!.gitignore`) and is called from `create_board`, `archive_task` and
   `ensure_board`, so the directory can never exist unprotected — that is how
@@ -111,6 +118,10 @@ update the `RAW=.../agile-md/vN` line in `install.sh` and the `curl` URL in
 - **v4** — `amd start` renamed to **`amd doing`**, so every move command is
   named for the column it moves the task into (`doing`, `done`). No alias is
   kept: `amd start` is an unknown command.
+- **v5** — `backlog/` added as the first column and `amd new` creates there
+  rather than in `todo/`; `amd todo <ref>` promotes. Existing boards gain the
+  directory automatically, but anything scripted against `tasks/todo/NNN-*.md`
+  right after `amd new` breaks.
 
 ## Conventions
 

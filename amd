@@ -7,9 +7,10 @@
 # current directory — so `amd` works in any git repository.
 #
 #   amd init                          create the board in this repository
-#   amd new "<title>" [options]       create a task in todo/
+#   amd new "<title>" [options]       create a task in backlog/
 #   amd board [filters]               show all columns (default)
-#   amd ls [todo|doing|done|archive|all] [filters]
+#   amd ls [backlog|todo|doing|done|archive|all] [filters]
+#   amd todo  <ref>                   backlog -> todo  (pull into the sprint)
 #   amd doing <ref>                   todo  -> doing
 #   amd done  <ref>                   doing -> done
 #   amd back  <ref>                   move a task one column left
@@ -18,6 +19,10 @@
 #   amd set   <ref> <field> <value>   set priority or repository on a task
 #   amd archive <ref>                 take a task off the board, into archive/
 #   amd clean                         delete everything in archive/ for good
+#
+# New tasks land in backlog/ and stay there until refined and pulled into
+# todo/ — the backlog is everything you might do, todo/ is what you have
+# committed to. Columns can be skipped: `amd doing <ref>` works from anywhere.
 #
 # Options for `new`:  -t <tag> (repeatable), -p <priority>, -r <repository>
 # Filters for `board`/`ls`:
@@ -40,7 +45,9 @@
 #
 set -euo pipefail
 
-COLUMNS=(todo doing "done")
+# Ordered left to right. New tasks land in the first column and are promoted
+# from it; `back` walks the list in reverse.
+COLUMNS=(backlog todo doing "done")
 
 # Set by parse_filters(); declared here so `set -u` is safe everywhere.
 FILTER_REPO=""
@@ -278,11 +285,19 @@ resolve_editor() {
   die "no editor found (set MARKDOWN_EDITOR or EDITOR)"
 }
 
-create_board() { # scaffolds the board at $BOARD
-  mkdir -p "${BOARD}/todo" "${BOARD}/doing" "${BOARD}/done"
-  for c in todo doing "done"; do
+# Columns are created on demand as well as by `init`, so a board written by an
+# older amd gains a new column (backlog/ in v5) the first time it is used
+# rather than failing when `new` writes into a directory that isn't there.
+ensure_columns() {
+  local c
+  for c in "${COLUMNS[@]}"; do
+    mkdir -p "${BOARD}/${c}"
     [ -e "${BOARD}/${c}/.gitkeep" ] || : > "${BOARD}/${c}/.gitkeep"
   done
+}
+
+create_board() { # scaffolds the board at $BOARD
+  ensure_columns
   ensure_archive
   if [ ! -e "${BOARD}/README.md" ]; then
     printf '# Tasks (agile-md)\n\nA filesystem Kanban managed by the `amd` command.\nStatus is the folder; `git mv` between columns is the audit trail.\nSee https://github.com/mrdoodles/agile-md\n' > "${BOARD}/README.md"
@@ -296,7 +311,7 @@ ensure_board() {
   # Every command repairs a missing archive/.gitignore on the way past: losing
   # it is how archived tasks would quietly get committed, and the check costs
   # one stat on a board that's already fine.
-  if [ -d "${BOARD}" ]; then ensure_archive; return 0; fi
+  if [ -d "${BOARD}" ]; then ensure_columns; ensure_archive; return 0; fi
   local reply=""
   if [ "${AMD_YES:-}" = "1" ]; then
     reply=y
@@ -328,8 +343,8 @@ parse_filters() {
     esac
   done
   case "${TARGET}" in
-    all|todo|doing|"done"|archive) ;;
-    *) die "unknown column '${TARGET}' (use: todo, doing, done, archive, all)" ;;
+    all|backlog|todo|doing|"done"|archive) ;;
+    *) die "unknown column '${TARGET}' (use: backlog, todo, doing, done, archive, all)" ;;
   esac
 }
 
@@ -368,7 +383,7 @@ case "${cmd}" in
     done
     [ -n "${repo}" ] || repo="$(default_repo)"
     id="$(next_id)"; slug="$(slugify "${title}")"
-    file="${BOARD}/todo/${id}-${slug}.md"
+    file="${BOARD}/backlog/${id}-${slug}.md"
     taglist=""
     if [ "${#tags[@]}" -gt 0 ]; then taglist="$(IFS=,; printf '%s' "${tags[*]}")"; fi
     {
@@ -381,7 +396,7 @@ case "${cmd}" in
       printf 'tags: [%s]\n' "${taglist}"
       printf -- '---\n\n## Notes\n\n\n## Checklist\n\n- [ ] \n'
     } > "${file}"
-    printf 'created todo/%s-%s.md\n' "${id}" "${slug}"
+    printf 'created backlog/%s-%s.md\n' "${id}" "${slug}"
     ;;
   board|ls|list)
     parse_filters "$@"
@@ -405,6 +420,10 @@ case "${cmd}" in
     esac
     ;;
   # Each move command is named for the column it moves the task *into*.
+  todo)
+    file="$(find_task "${1:?usage: amd todo <ref>}")"
+    move "${file}" todo
+    ;;
   doing)
     # Assign first: a `die` inside a substitution used directly as an argument
     # only kills the subshell, so the command would run on an empty path and
@@ -421,7 +440,8 @@ case "${cmd}" in
     case "$(column_of "${file}")" in
       done) move "${file}" doing ;;
       doing) move "${file}" todo ;;
-      todo) die "already in todo/" ;;
+      todo) move "${file}" backlog ;;
+      backlog) die "already in backlog/" ;;
     esac
     ;;
   archive)
