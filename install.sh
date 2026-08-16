@@ -4,7 +4,7 @@
 #
 #   ./install.sh [--dir DIR]     # default: /usr/local/bin if writable, else ~/bin
 #   ./install.sh --with-skill    # also install the Claude Code skill
-#   curl -fsSL https://raw.githubusercontent.com/mrdoodles/agile-md/v4/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/mrdoodles/agile-md/v5/install.sh | bash
 #
 # Then, in any git repository:  amd init  &&  amd new "My first task"
 #
@@ -28,7 +28,7 @@ if [ -z "${DIR}" ]; then
 fi
 
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RAW="https://raw.githubusercontent.com/mrdoodles/agile-md/v4"
+RAW="https://raw.githubusercontent.com/mrdoodles/agile-md/v5"
 
 mkdir -p "${DIR}"
 if [ -f "${SELF}/amd" ]; then
