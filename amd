@@ -129,18 +129,65 @@ repo_matches() { # <task-repository>
   esac
 }
 
-next_id() {
+# The board's id counter: the number the next task will take, one line in
+# ${BOARD}/.next-id. It remembers ids whose task has gone — deleted outright
+# rather than archived — which scanning the columns cannot.
+COUNTER=".next-id"
+
+stored_next_id() { # prints the counter, if it says anything sensible
+  local v
+  v="$(cat "${BOARD}/${COUNTER}" 2>/dev/null || true)"
+  if [[ "${v}" =~ ^[0-9]+$ ]]; then printf '%s' "${v}"; fi
+}
+
+highest_id() { # the largest id actually on the board, archive included
   local max=0 n f c
   # Archived tasks still hold their ids: reusing one would point every
   # reference at a different task.
   for c in "${COLUMNS[@]}" archive; do
     for f in "${BOARD}/${c}"/*.md; do
       [ -e "${f}" ] || continue
+      # The sed strips the padding, so this is already a plain decimal — no
+      # 10# needed, and `10#` would not work inside [ ] anyway.
       n="$(basename "${f}" | sed -E 's/^0*([0-9]+)-.*/\1/')"
       [[ "${n}" =~ ^[0-9]+$ ]] && [ "${n}" -gt "${max}" ] && max="${n}"
     done
   done
-  printf '%03d' $((max + 1))
+  printf '%s' "${max}"
+}
+
+# Whichever is higher of the counter and what is on disk. The counter is the
+# authority — it is what remembers a deleted task's id — but taking the max
+# means a counter that is lost, stale, or badly merged can never hand out an id
+# that is already in use. Losing the file costs the deleted ids, nothing more.
+next_id() {
+  local max next stored
+  max="$(highest_id)"
+  next=$((max + 1))
+  stored="$(stored_next_id)"
+  if [ -n "${stored}" ] && [ "${stored}" -gt "${next}" ]; then next="${stored}"; fi
+  printf '%03d' "${next}"
+}
+
+# Seed the counter on a board that predates it, from the high-water mark on
+# disk. Runs before every command, so a board adopts the counter the first time
+# it is touched rather than on the first `new` — which matters, because ids
+# deleted in between would otherwise be handed out again.
+ensure_counter() {
+  local high
+  if [ ! -e "${BOARD}/${COUNTER}" ]; then
+    high="$(highest_id)"
+    printf '%s\n' "$((high + 1))" > "${BOARD}/${COUNTER}"
+  fi
+}
+
+record_id() { # <id> — the counter only ever moves forward
+  local id="$1" stored next
+  next=$((10#${id} + 1))
+  stored="$(stored_next_id)"
+  if [ -z "${stored}" ] || [ "${stored}" -lt "${next}" ]; then
+    printf '%s\n' "${next}" > "${BOARD}/${COUNTER}"
+  fi
 }
 
 find_task() { # <ref> -> prints the matching file path (must be unique)
@@ -299,6 +346,7 @@ ensure_columns() {
 create_board() { # scaffolds the board at $BOARD
   ensure_columns
   ensure_archive
+  ensure_counter
   if [ ! -e "${BOARD}/README.md" ]; then
     printf '# Tasks (agile-md)\n\nA filesystem Kanban managed by the `amd` command.\nStatus is the folder; `git mv` between columns is the audit trail.\nSee https://github.com/mrdoodles/agile-md\n' > "${BOARD}/README.md"
   fi
@@ -311,7 +359,7 @@ ensure_board() {
   # Every command repairs a missing archive/.gitignore on the way past: losing
   # it is how archived tasks would quietly get committed, and the check costs
   # one stat on a board that's already fine.
-  if [ -d "${BOARD}" ]; then ensure_columns; ensure_archive; return 0; fi
+  if [ -d "${BOARD}" ]; then ensure_columns; ensure_archive; ensure_counter; return 0; fi
   local reply=""
   if [ "${AMD_YES:-}" = "1" ]; then
     reply=y
@@ -396,6 +444,7 @@ case "${cmd}" in
       printf 'tags: [%s]\n' "${taglist}"
       printf -- '---\n\n## Notes\n\n\n## Checklist\n\n- [ ] \n'
     } > "${file}"
+    record_id "${id}"
     printf 'created backlog/%s-%s.md\n' "${id}" "${slug}"
     ;;
   board|ls|list)

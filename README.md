@@ -137,8 +137,9 @@ force the archive back into the repository the `.gitignore` exists to keep it
 out of. Your commit of the archive shows only the deletion from the column.
 
 Two things archiving deliberately does not do: archived ids are never reused
-(`amd new` counts the archive too, so old `[[NNN-slug]]` references can't be
-silently repointed at a different task), and archived tasks stop resolving as
+(ids come from `tasks/.next-id`, and `amd new` counts the archive too, so old
+`[[NNN-slug]]` references can't be silently repointed at a different task),
+and archived tasks stop resolving as
 a `<ref>` — `amd show 4` won't find one. `amd clean` is the only command in
 `amd` that deletes anything, and it refuses to run non-interactively unless
 you set `AMD_YES=1`.
@@ -178,7 +179,7 @@ tags: [release]
 
 | Field | Set by | Notes |
 | --- | --- | --- |
-| `id` | `amd new` | Zero-padded, one higher than the largest id on the board. Never changes — it's how `<ref>` and `[[NNN-slug]]` wikilinks find a task. |
+| `id` | `amd new` | Zero-padded and never reused, tracked in `tasks/.next-id`. Never changes — it's how `<ref>` and `[[NNN-slug]]` wikilinks find a task. |
 | `title` | `amd new "<title>"` | Verbatim; also slugified into the filename. |
 | `repository` | `-r`, or the `origin` remote | `owner/name` from `git remote get-url origin`, falling back to the repository directory's name. What `amd board -r` filters on. |
 | `priority` | `-p`, default `medium` | `high`, `medium` or `low`. What `amd board -s priority` orders by. |
@@ -193,6 +194,14 @@ Nothing outside the frontmatter is parsed, so a task can grow whatever body it
 needs. Missing fields are tolerated: tasks written before `repository` and
 `priority` existed still list and sort (last, under `-s priority`), and
 `amd set` adds the field when it isn't there.
+
+Ids come from `tasks/.next-id`, a one-line counter in the board, taken
+together with the highest id on disk — whichever is higher wins. That way an id
+is never reused even if you delete a task outright, and deleting the counter
+costs you nothing but those freed ids. Commit it along with the board.
+
+Boards created before the counter existed need no migration: the first `amd`
+command of any kind seeds it from the highest id already on the board.
 
 The id gives a stable default ordering. Commit task moves like any other change
 — the `git mv` is the record of the transition. Tasks can reference each other
