@@ -17,7 +17,14 @@ audit trail** (moves are `git mv`), tasks are self-describing markdown.
 - `amd` — the CLI (the entire tool).
 - `install.sh` — installs `amd` to `/usr/local/bin` if writable, else `~/bin`
   (`--dir` overrides). Works both from a clone (copies `./amd`) and via
-  `curl … | bash` (fetches `raw…/v3/amd`) — keep those two paths in sync.
+  `curl … | bash` (fetches `raw…/vN/amd`) — keep those two paths in sync.
+  `--with-skill` installs `.claude/skills/agile-md/SKILL.md` to
+  `~/.claude/skills/`, by the same two paths; opt-in, because installing the
+  tool shouldn't write into another tool's config. The curl path only works
+  once the moving major tag points at a commit containing the file.
+- `.claude/skills/` — skills committed to the repo. `shell-scripting` and
+  `python-scripting` are about *building* the tool; `agile-md` is about *using*
+  a board, and is the one that ships to users.
 - `tests/test.sh` — assert-based suite; spins up temp git repos.
 - `.github/workflows/ci.yml` — shellcheck + tests.
 - `README.md`, `LICENSE` (MIT).
