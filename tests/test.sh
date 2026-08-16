@@ -227,6 +227,46 @@ assert "an option with no value is an error" bash -c "! bash '${AMD}' ls backlog
 cd "${tmp}" || exit 1
 rm -rf "${fields}"
 
+echo "id counter (.next-id):"
+ids="$(mktemp -d)"
+(
+  cd "${ids}" || exit 1
+  git init -q; git config user.email t@t.co; git config user.name t
+  bash "${AMD}" init >/dev/null
+)
+cd "${ids}" || exit 1
+assert "init writes a counter" bash -c "test \"\$(cat tasks/.next-id)\" = 1"
+bash "${AMD}" new "One" >/dev/null
+bash "${AMD}" new "Two" >/dev/null
+assert "creating a task advances it" bash -c "test \"\$(cat tasks/.next-id)\" = 3"
+# The reason the counter exists: a deleted task's id is gone from disk, so
+# scanning the columns would hand it straight back out.
+rm tasks/backlog/002-two.md
+bash "${AMD}" new "Three" >/dev/null
+assert "a deleted task's id is not reused" test -f tasks/backlog/003-three.md
+assert "and nothing reoccupies 002" bash -c "! test -f tasks/backlog/002-three.md"
+# Zero-padded ids are not octal: $((008)) is an error, $((10#008)) is 8.
+for n in 4 5 6 7 8 9; do bash "${AMD}" new "Filler${n}" >/dev/null; done
+assert "ids pass 007/008 without an octal error" test -f tasks/backlog/009-filler9.md
+assert "and the counter is decimal too" bash -c "test \"\$(cat tasks/.next-id)\" = 10"
+# The counter is authoritative but never trusted over reality.
+rm tasks/.next-id
+bash "${AMD}" new "After loss" >/dev/null
+assert "a lost counter falls back to the board" test -f tasks/backlog/010-after-loss.md
+printf '2\n' > tasks/.next-id
+bash "${AMD}" new "Stale" >/dev/null
+assert "a stale counter cannot reissue a live id" test -f tasks/backlog/011-stale.md
+printf '50\n' > tasks/.next-id
+bash "${AMD}" new "Ahead" >/dev/null
+assert "a counter ahead of the board wins" test -f tasks/backlog/050-ahead.md
+printf 'nonsense\n' > tasks/.next-id
+assert "a corrupt counter is ignored, not fatal" \
+  bash -c "bash '${AMD}' new 'Garbage' >/dev/null && test -f tasks/backlog/051-garbage.md"
+assert "archived ids still hold" \
+  bash -c "bash '${AMD}' archive 051 >/dev/null && bash '${AMD}' new 'Post archive' >/dev/null && test -f tasks/backlog/052-post-archive.md"
+cd "${tmp}" || exit 1
+rm -rf "${ids}"
+
 echo "guards:"
 assert "errors outside a git repository" \
   bash -c "cd '${nongit}' && ! bash '${AMD}' board"

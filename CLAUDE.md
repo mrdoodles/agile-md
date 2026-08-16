@@ -33,8 +33,15 @@ audit trail** (moves are `git mv`), tasks are self-describing markdown.
 
 - `board_dir()` resolves the board as `$(git rev-parse --show-toplevel)/${AMD_DIR:-tasks}`,
   so `amd` works from any subdirectory; it errors if not inside a git repo.
-- Tasks are `NNN-slug.md`. `next_id()` = max existing id across all columns + 1,
-  zero-padded — a stable id and a default ordering.
+- Tasks are `NNN-slug.md`, zero-padded — a stable id and a default ordering.
+  `next_id()` = **max of the `.next-id` counter and (highest id on disk + 1)**.
+  The counter is what remembers an id whose task was deleted outright rather
+  than archived; the max-with-disk fallback is what stops a lost, stale or
+  badly merged counter from reissuing an id that is still in use. Losing
+  `.next-id` costs only the deleted ids. `record_id` advances it after `new`
+  and only ever forwards. Arithmetic on a padded id needs `$((10#${id}))` —
+  `$((008))` is an octal error — but `highest_id`'s sed already strips the
+  padding, and `10#` does not work inside `[ ]` at all.
 - `find_task <ref>` resolves a numeric id or a unique slug substring to one file
   (errors on 0 or >1 matches).
 - Frontmatter carries `repository` and `priority`. `list_column` builds
