@@ -1,0 +1,21 @@
+# Who gets asked to review what. Later rules win, so the catch-all comes first.
+#
+# NOTE: `main`'s protection sets "required approving reviews" to 0, because a
+# single-maintainer repo cannot satisfy a review requirement — GitHub never
+# lets a PR author approve their own PR. Turning on "Require review from Code
+# Owners" while @mrdoodles is the only owner would deadlock every PR the same
+# way. This file is for routing and provenance until there is a second owner.
+
+*                       @mrdoodles
+
+# The tool itself: copied verbatim onto users' PATH, so a mistake ships to
+# everyone on the next release rather than failing in CI.
+/amd                    @mrdoodles
+/install.sh             @mrdoodles
+
+# Release-critical. The RAW= line and the curl URL name the moving major tag;
+# if they disagree with the tag, `curl | bash` installs the wrong version.
+/.github/workflows/     @mrdoodles
+
+# Ships to users' ~/.claude, so it changes how other people's agents behave.
+/.claude/skills/agile-md/ @mrdoodles
