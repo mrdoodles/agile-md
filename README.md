@@ -19,6 +19,22 @@ Installs the `amd` command to `/usr/local/bin` when it's writable, otherwise
 `~/bin` (override with `install.sh --dir <dir>`). If the chosen directory isn't
 on your `PATH`, the installer tells you what to add.
 
+### Claude Code skill (optional)
+
+If you use [Claude Code](https://claude.com/claude-code), `--with-skill` also
+installs a skill that teaches it to drive a board properly — creating tickets
+with `amd new` rather than hand-writing files (which can silently reuse an
+archived id), keeping frontmatter intact when writing a ticket body, and
+leaving the commit to you:
+
+```bash
+./install.sh --with-skill      # -> ~/.claude/skills/agile-md/SKILL.md
+```
+
+It's off by default: installing `amd` shouldn't write into another tool's
+configuration. To scope it to one project instead, copy the same file to
+`.claude/skills/agile-md/SKILL.md` in that repo.
+
 ## Use
 
 In any git repository:
