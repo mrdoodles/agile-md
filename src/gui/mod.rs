@@ -45,6 +45,7 @@ struct Card {
     title: String,
     id: String,
     assignee: Option<String>,
+    points: Option<String>,
     /// Sort key: the hand-set order when there is one, otherwise the id, so a
     /// board nobody has dragged still reads in id order.
     rank: f64,
@@ -54,7 +55,26 @@ struct RepoBoard {
     name: String,
     board: Board,
     lanes: Vec<Vec<Card>>,
+    /// Backlog tickets grouped by epic folder. `None` is the loose backlog —
+    /// everything not filed under an epic yet.
+    groups: Vec<(Option<String>, Vec<Card>)>,
     visible: bool,
+}
+
+/// Which of the two boards is on screen. The board is the committed work;
+/// the backlog is everything else, grouped by epic.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum View {
+    Board,
+    Backlog,
+}
+
+/// A ticket being written in the new-ticket overlay.
+struct Draft {
+    repo: usize,
+    title: String,
+    epic: Option<String>,
+    points: String,
 }
 
 /// The ticket open in the editor overlay. Holds its own copy of the fields, so
@@ -66,6 +86,7 @@ struct Editor {
     id: String,
     title: String,
     assignee: String,
+    points: String,
     body: String,
 }
 
@@ -77,6 +98,7 @@ impl Editor {
             id: card.id.clone(),
             title: card.task.title(),
             assignee: card.task.assignee().unwrap_or_default(),
+            points: card.task.points().unwrap_or_default(),
             body: card.task.body()?,
         })
     }
@@ -86,6 +108,12 @@ pub struct BoardApp {
     repos: Vec<RepoBoard>,
     status: Option<String>,
     editing: Option<Editor>,
+    drafting: Option<Draft>,
+    view: View,
+    /// Which repository the backlog view is showing. The board view stacks
+    /// every repository; the backlog is long enough that one at a time reads
+    /// better.
+    backlog_repo: usize,
 }
 
 impl BoardApp {
@@ -105,6 +133,7 @@ impl BoardApp {
                 // <repo>/tasks, so the latter labels every repository "tasks".
                 name: entry.name.clone(),
                 lanes: read_lanes(&board)?,
+                groups: read_groups(&board)?,
                 board,
                 visible: true,
             });
@@ -118,16 +147,39 @@ impl BoardApp {
             repos,
             status: None,
             editing: None,
+            drafting: None,
+            view: View::Board,
+            backlog_repo: 0,
         })
     }
 
     fn reload(&mut self) {
         for repo in &mut self.repos {
-            match read_lanes(&repo.board) {
-                Ok(lanes) => repo.lanes = lanes,
-                Err(err) => self.status = Some(format!("{err}")),
+            match (read_lanes(&repo.board), read_groups(&repo.board)) {
+                (Ok(lanes), Ok(groups)) => {
+                    repo.lanes = lanes;
+                    repo.groups = groups;
+                }
+                (Err(err), _) | (_, Err(err)) => self.status = Some(format!("{err}")),
             }
         }
+    }
+
+    /// File a backlog ticket under an epic, or back into the loose backlog.
+    fn refile(&mut self, path: &std::path::Path, repo: usize, epic: Option<String>) {
+        let outcome = (|| -> Result<()> {
+            let board = &self.repos[repo].board;
+            let task = Task::from_path(path, Column::Backlog)
+                .ok_or_else(|| anyhow!("{} is not a task", path.display()))?;
+            let found = board.find(&task.stem)?;
+            board.set_epic(&found, epic.as_deref())?;
+            Ok(())
+        })();
+        match outcome {
+            Ok(()) => self.status = None,
+            Err(err) => self.status = Some(format!("{err}")),
+        }
+        self.reload();
     }
 
     /// Write the editor's fields back to the ticket. Each field goes through
@@ -145,6 +197,7 @@ impl BoardApp {
                 .ok_or_else(|| anyhow!("{} is no longer on the board", editor.path.display()))?;
             task.set_title(&editor.title)?;
             task.assign(&editor.assignee)?;
+            task.set_points(&editor.points)?;
             task.set_body(&editor.body)
         })();
 
@@ -211,30 +264,56 @@ impl BoardApp {
     }
 }
 
+/// The backlog, split into the loose tickets and one group per epic folder.
+/// The loose group comes first and is always present, so there is somewhere to
+/// drop a ticket you want to take *out* of an epic.
+fn read_groups(board: &Board) -> Result<Vec<(Option<String>, Vec<Card>)>> {
+    let all = board.tasks_in(Column::Backlog)?;
+    let mut groups: Vec<(Option<String>, Vec<Card>)> = vec![(None, Vec::new())];
+    for epic in board.epics_in(Column::Backlog)? {
+        groups.push((Some(epic), Vec::new()));
+    }
+    for task in all {
+        let slot = groups
+            .iter_mut()
+            .find(|(name, _)| name.as_deref() == task.epic.as_deref());
+        if let Some((_, cards)) = slot {
+            cards.push(card_from(task));
+        }
+    }
+    for (_, cards) in &mut groups {
+        sort_cards(cards);
+    }
+    Ok(groups)
+}
+
+fn card_from(task: Task) -> Card {
+    let rank = task
+        .order()
+        .unwrap_or_else(|| task.id.map(f64::from).unwrap_or(f64::MAX));
+    Card {
+        title: task.title(),
+        id: task.id_display(),
+        assignee: task.assignee(),
+        points: task.points(),
+        rank,
+        task,
+    }
+}
+
+fn sort_cards(cards: &mut [Card]) {
+    cards.sort_by(|a, b| {
+        a.rank
+            .partial_cmp(&b.rank)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+}
+
 fn read_lanes(board: &Board) -> Result<Vec<Vec<Card>>> {
     let mut lanes = Vec::new();
     for column in Column::ALL {
-        let mut cards: Vec<Card> = board
-            .tasks_in(column)?
-            .into_iter()
-            .map(|task| {
-                let rank = task
-                    .order()
-                    .unwrap_or_else(|| task.id.map(f64::from).unwrap_or(f64::MAX));
-                Card {
-                    title: task.title(),
-                    id: task.id_display(),
-                    assignee: task.assignee(),
-                    rank,
-                    task,
-                }
-            })
-            .collect();
-        cards.sort_by(|a, b| {
-            a.rank
-                .partial_cmp(&b.rank)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        let mut cards: Vec<Card> = board.tasks_in(column)?.into_iter().map(card_from).collect();
+        sort_cards(&mut cards);
         lanes.push(cards);
     }
     Ok(lanes)
@@ -251,10 +330,40 @@ impl eframe::App for BoardApp {
             ui.horizontal_wrapped(|ui| {
                 ui.heading("agile-md");
                 ui.separator();
-                for repo in &mut self.repos {
-                    ui.checkbox(&mut repo.visible, &repo.name);
+                ui.selectable_value(&mut self.view, View::Board, "Board");
+                ui.selectable_value(&mut self.view, View::Backlog, "Backlog");
+                ui.separator();
+                match self.view {
+                    // The board stacks every repository; the backlog is long
+                    // enough that one at a time reads better.
+                    View::Board => {
+                        for repo in &mut self.repos {
+                            ui.checkbox(&mut repo.visible, &repo.name);
+                        }
+                    }
+                    View::Backlog => {
+                        if self.repos.len() > 1 {
+                            for (index, repo) in self.repos.iter().enumerate() {
+                                ui.selectable_value(&mut self.backlog_repo, index, &repo.name);
+                            }
+                        } else {
+                            ui.weak(&self.repos[0].name);
+                        }
+                    }
                 }
                 ui.separator();
+                if ui.button("New ticket").clicked() {
+                    let repo = match self.view {
+                        View::Backlog => self.backlog_repo,
+                        View::Board => 0,
+                    };
+                    self.drafting = Some(Draft {
+                        repo,
+                        title: String::new(),
+                        epic: None,
+                        points: String::new(),
+                    });
+                }
                 reload = ui.button("Reload").clicked();
                 // Follows the system by default, and remembers an explicit
                 // choice — egui persists the preference for us.
@@ -265,29 +374,52 @@ impl eframe::App for BoardApp {
             }
         });
 
+        let mut refile: Option<(PathBuf, usize, Option<String>)> = None;
+
         egui::CentralPanel::default().show(ui, |ui| {
-            egui::ScrollArea::both().show(ui, |ui| {
-                for (repo_index, repo) in self.repos.iter().enumerate() {
-                    if !repo.visible {
-                        continue;
+            egui::ScrollArea::both().show(ui, |ui| match self.view {
+                View::Board => {
+                    for (repo_index, repo) in self.repos.iter().enumerate() {
+                        if !repo.visible {
+                            continue;
+                        }
+                        if self.repos.iter().filter(|r| r.visible).count() > 1 {
+                            ui.label(egui::RichText::new(&repo.name).strong());
+                        }
+                        ui.horizontal_top(|ui| {
+                            for column in Column::ALL {
+                                if let Some(drop) =
+                                    column_ui(ui, repo, repo_index, column, &mut opened)
+                                {
+                                    pending = Some(drop);
+                                }
+                            }
+                        });
+                        ui.add_space(12.0);
                     }
-                    if self.repos.iter().filter(|r| r.visible).count() > 1 {
-                        ui.label(egui::RichText::new(&repo.name).strong());
-                    }
+                }
+                View::Backlog => {
+                    let index = self.backlog_repo.min(self.repos.len() - 1);
+                    let repo = &self.repos[index];
                     ui.horizontal_top(|ui| {
-                        for column in Column::ALL {
-                            if let Some(drop) = column_ui(ui, repo, repo_index, column, &mut opened)
+                        for (epic, cards) in &repo.groups {
+                            if let Some(target) =
+                                group_ui(ui, epic.as_deref(), cards, index, &mut opened)
                             {
-                                pending = Some(drop);
+                                refile = Some(target);
                             }
                         }
                     });
-                    ui.add_space(12.0);
                 }
             });
         });
 
         self.editor_ui(ui.ctx());
+        self.draft_ui(ui.ctx());
+
+        if let Some((path, repo, epic)) = refile {
+            self.refile(&path, repo, epic);
+        }
 
         if let Some(path) = opened {
             match self
@@ -308,6 +440,125 @@ impl eframe::App for BoardApp {
             self.apply(drop);
         } else if reload {
             self.reload();
+        }
+    }
+}
+
+/// The new-ticket overlay. Creating from the board is a deliberate act, so it
+/// asks for the few things worth deciding up front and leaves the body to the
+/// editor.
+#[cfg(feature = "gui")]
+impl BoardApp {
+    fn draft_ui(&mut self, ctx: &egui::Context) {
+        let Some(draft) = &mut self.drafting else {
+            return;
+        };
+
+        let mut create = false;
+        let mut cancel = false;
+        let epics = self.repos[draft.repo]
+            .groups
+            .iter()
+            .filter_map(|(epic, _)| epic.clone())
+            .collect::<Vec<_>>();
+        let repo_name = self.repos[draft.repo].name.clone();
+
+        let modal = egui::Modal::new(egui::Id::new("new-ticket")).show(ctx, |ui| {
+            ui.set_width(460.0);
+            ui.heading(format!("New ticket in {repo_name}"));
+            ui.separator();
+
+            egui::Grid::new("draft")
+                .num_columns(2)
+                .spacing([8.0, 6.0])
+                .show(ui, |ui| {
+                    ui.label("Title");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut draft.title).desired_width(f32::INFINITY),
+                    );
+                    ui.end_row();
+
+                    ui.label("Epic");
+                    egui::ComboBox::from_id_salt("epic")
+                        .selected_text(draft.epic.clone().unwrap_or_else(|| "(none)".into()))
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut draft.epic, None, "(none)");
+                            for epic in &epics {
+                                ui.selectable_value(&mut draft.epic, Some(epic.clone()), epic);
+                            }
+                        });
+                    ui.end_row();
+
+                    ui.label("Points");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut draft.points)
+                            .desired_width(80.0)
+                            .hint_text("e.g. 3"),
+                    );
+                    ui.end_row();
+                });
+
+            ui.separator();
+            ui.horizontal(|ui| {
+                create = ui
+                    .add_enabled(!draft.title.trim().is_empty(), egui::Button::new("Create"))
+                    .clicked();
+                cancel = ui.button("Cancel").clicked();
+                ui.weak("lands in the backlog");
+            });
+        });
+
+        if create {
+            self.create_ticket();
+        } else if cancel || modal.should_close() {
+            self.drafting = None;
+        }
+    }
+
+    /// Create the drafted ticket through the same path `amd new` uses, then
+    /// file it under its epic and size it.
+    fn create_ticket(&mut self) {
+        let Some(draft) = &self.drafting else { return };
+        let repo = draft.repo;
+        let title = draft.title.trim().to_string();
+        let epic = draft.epic.clone();
+        let points = draft.points.trim().to_string();
+
+        let outcome = (|| -> Result<()> {
+            let board = &self.repos[repo].board;
+            // The same two steps `amd new` takes: render a draft from the
+            // templates, then write it. Going through create:: means a ticket
+            // made here is identical to one made from the CLI.
+            let templates = crate::templates::Templates::load(board)?;
+            let draft = crate::create::Draft::prepare(
+                board,
+                &templates,
+                crate::create::NewTicket {
+                    title: title.clone(),
+                    template: crate::templates::DEFAULT_TEMPLATE.to_string(),
+                    branch_type: String::new(),
+                    assignee: String::new(),
+                    parent: None,
+                    related: Vec::new(),
+                    tags: Vec::new(),
+                    extra: Default::default(),
+                },
+            )?;
+            let created = draft.write(board, None)?;
+            if !points.is_empty() {
+                created.task.set_points(&points)?;
+            }
+            board.set_epic(&created.task, epic.as_deref())?;
+            Ok(())
+        })();
+
+        match outcome {
+            Ok(()) => {
+                self.status = None;
+                self.drafting = None;
+                self.reload();
+            }
+            Err(err) => self.status = Some(format!("{err}")),
         }
     }
 }
@@ -346,6 +597,13 @@ impl BoardApp {
                             .hint_text("unassigned"),
                     );
                     ui.end_row();
+                    ui.label("Points");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut editor.points)
+                            .desired_width(80.0)
+                            .hint_text("unsized"),
+                    );
+                    ui.end_row();
                 });
 
             ui.add_space(6.0);
@@ -375,6 +633,56 @@ impl BoardApp {
             self.editing = None;
         }
     }
+}
+
+/// One epic group in the backlog: a column of cards under the epic's name,
+/// with the loose backlog first. Dropping a card here files it under this
+/// epic, which moves the file and rewrites its `epic` key to match.
+#[cfg(feature = "gui")]
+fn group_ui(
+    ui: &mut egui::Ui,
+    epic: Option<&str>,
+    cards: &[Card],
+    repo_index: usize,
+    opened: &mut Option<PathBuf>,
+) -> Option<(PathBuf, usize, Option<String>)> {
+    let heading = epic.unwrap_or("(no epic)");
+    let points: i64 = cards
+        .iter()
+        .filter_map(|card| card.points.as_deref())
+        .filter_map(|p| p.trim().parse::<i64>().ok())
+        .sum();
+
+    let frame = egui::Frame::default()
+        .inner_margin(6.0)
+        .fill(ui.visuals().faint_bg_color)
+        .corner_radius(4.0);
+
+    let (_, payload) = ui.dnd_drop_zone::<Dragged, ()>(frame, |ui| {
+        ui.vertical(|ui| {
+            ui.set_width(COLUMN_WIDTH);
+            ui.set_min_height(160.0);
+            let label = if points > 0 {
+                format!("{}  ({}, {points} pts)", heading, cards.len())
+            } else {
+                format!("{}  ({})", heading, cards.len())
+            };
+            ui.label(egui::RichText::new(label).monospace().strong());
+            for card in cards {
+                if card_ui(ui, card, repo_index) {
+                    *opened = Some(card.task.path.clone());
+                }
+            }
+            if cards.is_empty() {
+                ui.weak("(empty)");
+            }
+        });
+    });
+
+    payload.and_then(|dragged| {
+        (dragged.repo == repo_index)
+            .then(|| (dragged.path.clone(), repo_index, epic.map(str::to_string)))
+    })
 }
 
 /// One status column: a header, then its cards top to bottom, with a drop slot

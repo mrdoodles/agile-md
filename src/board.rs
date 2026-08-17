@@ -275,7 +275,14 @@ impl Board {
             if dest.exists() {
                 bail!("{} already exists", dest.display());
             }
-            git::mv(&self.root, &task.path, &dest)?;
+            // Same rule as move_task: `git mv` so history follows the rename
+            // when the ticket is tracked, a plain rename when it is not.
+            if git::is_tracked(&self.root, &task.path) {
+                git::mv(&self.root, &task.path, &dest)?;
+            } else {
+                fs::rename(&task.path, &dest)
+                    .with_context(|| format!("moving {}", task.path.display()))?;
+            }
         }
         let moved = Task::from_path(&dest, Column::Backlog)
             .ok_or_else(|| anyhow::anyhow!("{} is not a task", dest.display()))?;
@@ -473,6 +480,62 @@ mod tests {
 
     fn touch(board: &Board, name: &str) {
         fs::write(board.dir(Column::Todo).join(name), "---\n---\n").unwrap();
+    }
+
+    fn backlog_ticket(board: &Board, name: &str) {
+        let body = format!("---\nid: \"{}\"\ntitle: \"T\"\n---\n\nbody\n", &name[..3]);
+        fs::write(board.dir(Column::Backlog).join(name), body).unwrap();
+    }
+
+    #[test]
+    fn tickets_inside_an_epic_folder_are_still_on_the_board() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board_at(dir.path());
+        backlog_ticket(&board, "001-loose.md");
+        let epic = board.dir(Column::Backlog).join("checkout");
+        fs::create_dir_all(&epic).unwrap();
+        fs::write(epic.join("002-filed.md"), "---\nid: \"002\"\n---\n").unwrap();
+
+        let tasks = board.tasks_in(Column::Backlog).unwrap();
+        assert_eq!(tasks.len(), 2, "the filed ticket must be seen");
+        let filed = tasks.iter().find(|t| t.stem == "002-filed").unwrap();
+        assert_eq!(filed.epic.as_deref(), Some("checkout"));
+
+        // The reason this matters: an unseen ticket is an id handed out twice.
+        assert_eq!(board.next_id().unwrap(), 3);
+        assert_eq!(board.epics_in(Column::Backlog).unwrap(), ["checkout"]);
+        // Epics are a backlog idea only.
+        assert!(board.epics_in(Column::Todo).unwrap().is_empty());
+    }
+
+    #[test]
+    fn filing_under_an_epic_moves_the_file_and_updates_the_ticket() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board_at(dir.path());
+        backlog_ticket(&board, "001-loose.md");
+        let task = board.find("001").unwrap();
+
+        let dest = board.set_epic(&task, Some("checkout")).unwrap();
+        assert!(dest.ends_with("backlog/checkout/001-loose.md"), "{dest:?}");
+        assert!(!task.path.exists(), "the original must have moved");
+        let filed = board.find("001").unwrap();
+        assert_eq!(filed.epic_meta().as_deref(), Some("checkout"));
+        assert!(
+            fs::read_to_string(&filed.path).unwrap().ends_with("body\n"),
+            "the body must survive the move"
+        );
+
+        // Moving to another epic rewrites the key rather than accumulating.
+        board.set_epic(&filed, Some("payments")).unwrap();
+        let moved = board.find("001").unwrap();
+        assert_eq!(moved.epic_meta().as_deref(), Some("payments"));
+        assert_eq!(moved.epic.as_deref(), Some("payments"));
+
+        // And back out to the loose backlog.
+        board.set_epic(&moved, None).unwrap();
+        let loose = board.find("001").unwrap();
+        assert_eq!(loose.epic, None);
+        assert_eq!(loose.epic_meta(), None);
     }
 
     #[test]
