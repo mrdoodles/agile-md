@@ -1,10 +1,10 @@
 //! The desktop board.
 //!
-//! Laid out the opposite way round to a conventional Kanban: each status is a
-//! horizontal lane, and the tickets inside it run left to right. So dragging a
-//! card **sideways reorders** it within its status, and dragging it **up or
-//! down changes** its status. One window shows every registered repository, so
-//! work across boards is visible together without a web front end.
+//! A conventional Kanban: each status is a column, side by side, with its
+//! tickets stacked top to bottom. Dragging a card **up or down reorders** it
+//! within its status; dragging it **across changes** its status. One window
+//! shows every registered repository, so work across boards is visible
+//! together without a web front end.
 
 use std::path::PathBuf;
 
@@ -13,6 +13,10 @@ use anyhow::{Result, anyhow};
 use crate::board::{Board, Column};
 use crate::registry::Registry;
 use crate::task::Task;
+
+/// Wide enough for a title of a few words without wrapping to three lines,
+/// narrow enough that three columns and a scrollbar fit a laptop screen.
+const COLUMN_WIDTH: f32 = 260.0;
 
 /// A card being dragged. Carries where it came from, so the drop can tell a
 /// reorder from a status change — and refuse a move between repositories,
@@ -194,6 +198,9 @@ impl eframe::App for BoardApp {
                 }
                 ui.separator();
                 reload = ui.button("Reload").clicked();
+                // Follows the system by default, and remembers an explicit
+                // choice — egui persists the preference for us.
+                egui::global_theme_preference_switch(ui);
             });
             if let Some(status) = &self.status {
                 ui.colored_label(egui::Color32::from_rgb(220, 80, 80), status);
@@ -209,11 +216,13 @@ impl eframe::App for BoardApp {
                     if self.repos.iter().filter(|r| r.visible).count() > 1 {
                         ui.label(egui::RichText::new(&repo.name).strong());
                     }
-                    for column in Column::ALL {
-                        if let Some(drop) = lane_ui(ui, repo, repo_index, column) {
-                            pending = Some(drop);
+                    ui.horizontal_top(|ui| {
+                        for column in Column::ALL {
+                            if let Some(drop) = column_ui(ui, repo, repo_index, column) {
+                                pending = Some(drop);
+                            }
                         }
-                    }
+                    });
                     ui.add_space(12.0);
                 }
             });
@@ -227,18 +236,18 @@ impl eframe::App for BoardApp {
     }
 }
 
-/// One status lane: a header, then its cards left to right, with a drop slot
-/// before each card and one at the end.
+/// One status column: a header, then its cards top to bottom, with a drop slot
+/// above each card and one at the end. Columns sit side by side, so dragging a
+/// card up or down reorders it and dragging it across changes its status.
 #[cfg(feature = "gui")]
-fn lane_ui(ui: &mut egui::Ui, repo: &RepoBoard, repo_index: usize, column: Column) -> Option<Drop> {
+fn column_ui(
+    ui: &mut egui::Ui,
+    repo: &RepoBoard,
+    repo_index: usize,
+    column: Column,
+) -> Option<Drop> {
     let mut result = None;
     let cards = &repo.lanes[column as usize];
-
-    ui.label(
-        egui::RichText::new(column.as_str().to_uppercase())
-            .monospace()
-            .strong(),
-    );
 
     let frame = egui::Frame::default()
         .inner_margin(6.0)
@@ -246,8 +255,18 @@ fn lane_ui(ui: &mut egui::Ui, repo: &RepoBoard, repo_index: usize, column: Colum
         .corner_radius(4.0);
 
     let (_, payload) = ui.dnd_drop_zone::<Dragged, ()>(frame, |ui| {
-        ui.horizontal(|ui| {
-            ui.set_min_height(110.0);
+        ui.vertical(|ui| {
+            ui.set_width(COLUMN_WIDTH);
+            ui.set_min_height(160.0);
+            ui.label(
+                egui::RichText::new(format!(
+                    "{}  ({})",
+                    column.as_str().to_uppercase(),
+                    cards.len()
+                ))
+                .monospace()
+                .strong(),
+            );
             for (index, card) in cards.iter().enumerate() {
                 if let Some(drop) = slot(ui, repo_index, column, index) {
                     result = Some(drop);
@@ -279,12 +298,13 @@ fn lane_ui(ui: &mut egui::Ui, repo: &RepoBoard, repo_index: usize, column: Colum
 }
 
 /// A thin gap between cards that accepts a drop, giving exact placement
-/// without measuring pointer geometry.
+/// without measuring pointer geometry. Horizontal, since cards stack downwards.
 #[cfg(feature = "gui")]
 fn slot(ui: &mut egui::Ui, repo_index: usize, column: Column, index: usize) -> Option<Drop> {
     let frame = egui::Frame::default().inner_margin(2.0);
     let (_, payload) = ui.dnd_drop_zone::<Dragged, ()>(frame, |ui| {
-        let (rect, _) = ui.allocate_exact_size(egui::vec2(6.0, 100.0), egui::Sense::hover());
+        let (rect, _) =
+            ui.allocate_exact_size(egui::vec2(COLUMN_WIDTH - 16.0, 6.0), egui::Sense::hover());
         if ui.is_rect_visible(rect) && egui::DragAndDrop::has_any_payload(ui.ctx()) {
             ui.painter()
                 .rect_filled(rect, 2.0, ui.visuals().selection.bg_fill);
@@ -302,7 +322,8 @@ fn slot(ui: &mut egui::Ui, repo_index: usize, column: Column, index: usize) -> O
     })
 }
 
-/// A ticket: a portrait card, so a lane holds many across the width.
+/// A ticket: the width of its column, as tall as its title needs, so a column
+/// reads as a stack.
 #[cfg(feature = "gui")]
 fn card_ui(ui: &mut egui::Ui, card: &Card, repo_index: usize) {
     let id = egui::Id::new(("card", &card.task.path));
@@ -317,14 +338,20 @@ fn card_ui(ui: &mut egui::Ui, card: &Card, repo_index: usize) {
             .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
             .corner_radius(4.0)
             .show(ui, |ui| {
-                ui.set_width(150.0);
-                ui.set_min_height(94.0);
+                ui.set_width(COLUMN_WIDTH - 28.0);
                 ui.vertical(|ui| {
-                    ui.label(egui::RichText::new(&card.id).monospace().weak());
-                    ui.label(egui::RichText::new(&card.title).strong());
-                    if let Some(who) = &card.assignee {
-                        ui.weak(who);
-                    }
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(&card.id).monospace().weak());
+                        if let Some(who) = &card.assignee {
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    ui.weak(who);
+                                },
+                            );
+                        }
+                    });
+                    ui.label(&card.title);
                 });
             });
     });
