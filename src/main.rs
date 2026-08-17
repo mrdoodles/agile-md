@@ -82,13 +82,13 @@ enum Cmd {
     New(NewArgs),
     /// Show all columns (the default command)
     Board,
-    /// List a column: todo, doing, done or all
+    /// List a column: backlog, todo, doing, done or all
     #[command(alias = "list")]
     Ls {
         #[arg(
             default_value = "all",
             value_name = "COLUMN",
-            value_parser = PossibleValuesParser::new(["todo", "doing", "done", "all"]),
+            value_parser = PossibleValuesParser::new(["backlog", "todo", "doing", "done", "all"]),
         )]
         column: String,
     },
@@ -113,7 +113,7 @@ enum Cmd {
         #[arg(value_name = "REF")]
         task: Option<String>,
     },
-    /// Take a ticket off the board, into <board>/junk/
+    /// Take a ticket off the board, into <board>/archive/
     #[command(alias = "junk")]
     Rm {
         #[arg(value_name = "REF")]
@@ -323,7 +323,7 @@ fn run() -> Result<()> {
             branch,
             no_branch,
         } => {
-            let task = resolve(&board, task, "start", &[Column::Todo])?;
+            let task = resolve(&board, task, "start", &[Column::Backlog, Column::Todo])?;
             cmd_start(&board, &task, branch, no_branch)
         }
         Cmd::Done { task } => {
@@ -334,13 +334,13 @@ fn run() -> Result<()> {
             let task = resolve(&board, task, "back", &[Column::Doing, Column::Done])?;
             match task.column.left() {
                 Some(column) => board.move_task(&task, column),
-                None => bail!("already in {}/", Column::Todo),
+                None => bail!("already in {}/", Column::Backlog),
             }
         }
         Cmd::Rm { task } => {
             let task = resolve(&board, task, "rm", &Column::ALL)?;
-            board.junk(&task)?;
-            println!("junked {} -> junk/", task.file_name());
+            board.archive(&task)?;
+            println!("archived {} -> archive/", task.file_name());
             Ok(())
         }
         Cmd::Show { task } => {
@@ -706,7 +706,7 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
     for id in &created.linked {
         println!("{id} now links to {}", created.task.id_display());
     }
-    println!("created {}/{name}{note}", Column::Todo);
+    println!("created {}/{name}{note}", Column::Backlog);
     Ok(())
 }
 

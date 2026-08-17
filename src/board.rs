@@ -7,7 +7,7 @@ use std::env;
 use std::fmt;
 use std::fs;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
 
@@ -18,31 +18,33 @@ use crate::templates;
 /// Default board directory name; override with `AMD_DIR`.
 const DEFAULT_DIR: &str = "tasks";
 
-/// Where junked tickets go. Not a column: it's off the board, and its contents
-/// are gitignored, so junking a ticket takes it out of the history rather than
-/// recording a fourth status.
-const JUNK: &str = "junk";
+/// Where archived tickets go. Not a column: it's off the board, and its
+/// contents are gitignored, so archiving takes a ticket out of the history
+/// rather than recording another status.
+const ARCHIVE: &str = "archive";
 
-/// Keeps the junk drawer itself in git while ignoring what's in it.
-const JUNK_GITIGNORE: &str = "*\n!.gitignore\n";
+/// Keeps the drawer itself in git while ignoring what's in it.
+const ARCHIVE_GITIGNORE: &str = "*\n!.gitignore\n";
 
 /// The board's id counter: the number the next ticket will take. One line,
 /// tracked with the board, so ids keep climbing even when tickets are deleted
-/// outright rather than junked — a scan can only see what's still there.
+/// outright rather than archived — a scan can only see what's still there.
 const COUNTER: &str = ".next-id";
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Column {
+    Backlog,
     Todo,
     Doing,
     Done,
 }
 
 impl Column {
-    pub const ALL: [Column; 3] = [Column::Todo, Column::Doing, Column::Done];
+    pub const ALL: [Column; 4] = [Column::Backlog, Column::Todo, Column::Doing, Column::Done];
 
     pub fn as_str(self) -> &'static str {
         match self {
+            Column::Backlog => "backlog",
             Column::Todo => "todo",
             Column::Doing => "doing",
             Column::Done => "done",
@@ -52,7 +54,8 @@ impl Column {
     /// The column to the left, if any — `amd back`.
     pub fn left(self) -> Option<Column> {
         match self {
-            Column::Todo => None,
+            Column::Backlog => None,
+            Column::Todo => Some(Column::Backlog),
             Column::Doing => Some(Column::Todo),
             Column::Done => Some(Column::Doing),
         }
@@ -134,8 +137,8 @@ impl Board {
         self.root.join("templates")
     }
 
-    pub fn junk_dir(&self) -> PathBuf {
-        self.root.join(JUNK)
+    pub fn archive_dir(&self) -> PathBuf {
+        self.root.join(ARCHIVE)
     }
 
     pub fn counter_path(&self) -> PathBuf {
@@ -161,12 +164,12 @@ impl Board {
                 fs::write(&keep, "").with_context(|| format!("creating {}", keep.display()))?;
             }
         }
-        // The junk drawer is tracked, its contents are not.
-        let junk = self.junk_dir();
-        fs::create_dir_all(&junk).with_context(|| format!("creating {}", junk.display()))?;
-        let ignore = junk.join(".gitignore");
+        // The drawer is tracked; what you put in it is not.
+        let archive = self.archive_dir();
+        fs::create_dir_all(&archive).with_context(|| format!("creating {}", archive.display()))?;
+        let ignore = archive.join(".gitignore");
         if !ignore.exists() {
-            fs::write(&ignore, JUNK_GITIGNORE)
+            fs::write(&ignore, ARCHIVE_GITIGNORE)
                 .with_context(|| format!("creating {}", ignore.display()))?;
         }
 
@@ -186,9 +189,59 @@ impl Board {
     }
 
     /// Tasks in one column, ordered by id then filename.
+    /// Every ticket in a column, epic folders included.
+    ///
+    /// The backlog may hold subdirectories — one per epic or sprint — and their
+    /// tickets are as real as the loose ones. Anything that counts ids must see
+    /// them: a ticket invisible to the scan is an id waiting to be handed out
+    /// twice, which silently repoints every reference to it.
     pub fn tasks_in(&self, column: Column) -> Result<Vec<Task>> {
         let dir = self.dir(column);
+        let mut tasks = self.tasks_directly_in(&dir, column, None)?;
+        for epic in self.epics_in(column)? {
+            tasks.extend(self.tasks_directly_in(&dir.join(&epic), column, Some(epic))?);
+        }
+        tasks.sort_by(|a, b| a.id.cmp(&b.id).then_with(|| a.stem.cmp(&b.stem)));
+        Ok(tasks)
+    }
+
+    /// The epic folders of a column, named by directory. Only the backlog has
+    /// them: an epic is a way to group work you have not committed to yet, and
+    /// letting them appear in every column would make "status is the folder"
+    /// ambiguous.
+    pub fn epics_in(&self, column: Column) -> Result<Vec<String>> {
+        if column != Column::Backlog {
+            return Ok(Vec::new());
+        }
+        let dir = self.dir(column);
         let entries = match fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(err) => return Err(err).with_context(|| format!("reading {}", dir.display())),
+        };
+        let mut epics = Vec::new();
+        for entry in entries {
+            let path = entry
+                .with_context(|| format!("reading {}", dir.display()))?
+                .path();
+            if path.is_dir()
+                && let Some(name) = path.file_name().and_then(|name| name.to_str())
+                && !name.starts_with('.')
+            {
+                epics.push(name.to_string());
+            }
+        }
+        epics.sort();
+        Ok(epics)
+    }
+
+    fn tasks_directly_in(
+        &self,
+        dir: &Path,
+        column: Column,
+        epic: Option<String>,
+    ) -> Result<Vec<Task>> {
+        let entries = match fs::read_dir(dir) {
             Ok(entries) => entries,
             Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
             Err(err) => return Err(err).with_context(|| format!("reading {}", dir.display())),
@@ -199,13 +252,35 @@ impl Board {
                 .with_context(|| format!("reading {}", dir.display()))?
                 .path();
             if path.is_file()
-                && let Some(task) = Task::from_path(&path, column)
+                && let Some(mut task) = Task::from_path(&path, column)
             {
+                task.epic = epic.clone();
                 tasks.push(task);
             }
         }
-        tasks.sort_by(|a, b| a.id.cmp(&b.id).then_with(|| a.stem.cmp(&b.stem)));
         Ok(tasks)
+    }
+
+    /// File a ticket under an epic, or move it back to the loose backlog with
+    /// `None`. The folder is the move; the frontmatter is updated to match, so
+    /// a ticket read on its own still says which epic it belongs to.
+    pub fn set_epic(&self, task: &Task, epic: Option<&str>) -> Result<PathBuf> {
+        let dir = match epic {
+            Some(name) => self.dir(Column::Backlog).join(name),
+            None => self.dir(Column::Backlog),
+        };
+        fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+        let dest = dir.join(task.file_name());
+        if dest != task.path {
+            if dest.exists() {
+                bail!("{} already exists", dest.display());
+            }
+            git::mv(&self.root, &task.path, &dest)?;
+        }
+        let moved = Task::from_path(&dest, Column::Backlog)
+            .ok_or_else(|| anyhow::anyhow!("{} is not a task", dest.display()))?;
+        moved.set_epic_meta(epic.unwrap_or_default())?;
+        Ok(dest)
     }
 
     /// Every task on the board, column order first.
@@ -257,10 +332,10 @@ impl Board {
         Ok(self.tasks()?.into_iter().map(|task| task.stem).collect())
     }
 
-    /// Tickets that have been junked. Not part of the board, but they still
+    /// Tickets that have been archived. Not part of the board, but they still
     /// hold ids.
-    pub fn junked(&self) -> Result<Vec<Task>> {
-        let dir = self.junk_dir();
+    pub fn archived(&self) -> Result<Vec<Task>> {
+        let dir = self.archive_dir();
         let entries = match fs::read_dir(&dir) {
             Ok(entries) => entries,
             Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -286,10 +361,10 @@ impl Board {
     /// file and one past the highest id on the board.
     ///
     /// The counter is the authority — it remembers ids whose tickets have gone,
-    /// junked or deleted, which no scan can. The scan is the safety net: a
+    /// archived or deleted, which no scan can. The scan is the safety net: a
     /// lost, stale or badly merged counter can then never hand out an id that
     /// is already in use, and a ticket added by hand still pushes it along.
-    /// Only the columns are scanned; the junk drawer is off the board and the
+    /// Only the columns are scanned; the archive is off the board and the
     /// counter already accounts for it.
     pub fn next_id(&self) -> Result<u32> {
         let highest = self
@@ -313,12 +388,12 @@ impl Board {
         fs::write(&path, format!("{next}\n")).with_context(|| format!("writing {}", path.display()))
     }
 
-    /// Take a ticket off the board. The junk directory is gitignored, so a
+    /// Take a ticket off the board. The archive is gitignored, so a
     /// tracked ticket leaves the index (`git rm --cached`) and then moves —
     /// `git mv` would refuse the ignored destination, and forcing it would put
     /// the junk back into the history the .gitignore is there to keep it out of.
-    pub fn junk(&self, task: &Task) -> Result<PathBuf> {
-        let dir = self.junk_dir();
+    pub fn archive(&self, task: &Task) -> Result<PathBuf> {
+        let dir = self.archive_dir();
         fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
         let dest = dir.join(task.file_name());
         if dest.exists() {
@@ -457,16 +532,18 @@ mod tests {
     }
 
     #[test]
-    fn columns_move_left_until_todo() {
+    fn columns_move_left_until_the_backlog() {
         assert_eq!(Column::Done.left(), Some(Column::Doing));
         assert_eq!(Column::Doing.left(), Some(Column::Todo));
-        assert_eq!(Column::Todo.left(), None);
+        assert_eq!(Column::Todo.left(), Some(Column::Backlog));
+        assert_eq!(Column::Backlog.left(), None);
     }
 
     #[test]
     fn columns_parse_case_insensitively() {
         assert_eq!(Column::parse("DONE"), Some(Column::Done));
         assert_eq!(Column::parse("todo"), Some(Column::Todo));
-        assert_eq!(Column::parse("backlog"), None);
+        assert_eq!(Column::parse("Backlog"), Some(Column::Backlog));
+        assert_eq!(Column::parse("archive"), None);
     }
 }

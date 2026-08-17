@@ -114,7 +114,7 @@ impl Draft {
         let number = board.next_id()?;
         let id = format!("{number:03}");
         let slug = task::slugify(&ticket.title);
-        let dir = board.dir(Column::Todo);
+        let dir = board.dir(Column::Backlog);
         let path = dir.join(format!("{id}-{slug}.md"));
         if path.exists() {
             bail!("{} already exists", path.display());
@@ -141,7 +141,7 @@ impl Draft {
             tags: ticket.tags,
             created,
             timestamp,
-            column: Column::Todo.to_string(),
+            column: Column::Backlog.to_string(),
             author: git::config("user.name").unwrap_or_else(|| "unknown".to_string()),
             email: git::config("user.email").unwrap_or_default(),
             board: board.name(),
@@ -195,7 +195,7 @@ impl Draft {
             }
         }
 
-        let task = Task::from_path(&self.path, Column::Todo)
+        let task = Task::from_path(&self.path, Column::Backlog)
             .ok_or_else(|| anyhow::anyhow!("{} is not a task file", self.path.display()))?;
         Ok(Created {
             task,

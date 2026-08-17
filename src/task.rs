@@ -21,6 +21,10 @@ pub struct Task {
     pub id: Option<u32>,
     /// Filename without the `.md` extension, e.g. `001-first-task`.
     pub stem: String,
+    /// The epic folder the ticket sits in, for tickets filed under one. The
+    /// folder is what decides this — the `epic` frontmatter key follows it,
+    /// not the other way round, so moving the file is what changes the epic.
+    pub epic: Option<String>,
 }
 
 impl Task {
@@ -38,6 +42,7 @@ impl Task {
             column,
             id,
             stem,
+            epic: None,
         })
     }
 
@@ -118,6 +123,39 @@ impl Task {
             .with_context(|| format!("reading {}", self.path.display()))?;
         let quoted = format!("{:?}", who);
         let updated = set_meta(&text, "assignee", &quoted)
+            .with_context(|| format!("updating {}", self.path.display()))?;
+        fs::write(&self.path, updated).with_context(|| format!("writing {}", self.path.display()))
+    }
+
+    /// Story points, when the ticket has been sized. Free-form on purpose:
+    /// teams use 1/2/3/5/8, or T-shirt sizes, and the board only needs to show
+    /// it back.
+    pub fn points(&self) -> Option<String> {
+        self.meta("points").filter(|points| !points.is_empty())
+    }
+
+    /// Size the ticket, or clear the size with an empty string.
+    pub fn set_points(&self, points: &str) -> Result<()> {
+        let text = fs::read_to_string(&self.path)
+            .with_context(|| format!("reading {}", self.path.display()))?;
+        let updated = set_meta(&text, "points", &format!("{points:?}"))
+            .with_context(|| format!("updating {}", self.path.display()))?;
+        fs::write(&self.path, updated).with_context(|| format!("writing {}", self.path.display()))
+    }
+
+    /// The epic recorded in the frontmatter. `Task::epic` — set from the
+    /// folder — is the authority; this is what a reader outside the board
+    /// sees, and the two are kept in step when a ticket is filed.
+    pub fn epic_meta(&self) -> Option<String> {
+        self.meta("epic").filter(|epic| !epic.is_empty())
+    }
+
+    /// Record the epic in the frontmatter, so the ticket says which epic it
+    /// belongs to even when read on its own.
+    pub fn set_epic_meta(&self, epic: &str) -> Result<()> {
+        let text = fs::read_to_string(&self.path)
+            .with_context(|| format!("reading {}", self.path.display()))?;
+        let updated = set_meta(&text, "epic", &format!("{epic:?}"))
             .with_context(|| format!("updating {}", self.path.display()))?;
         fs::write(&self.path, updated).with_context(|| format!("writing {}", self.path.display()))
     }

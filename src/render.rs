@@ -246,6 +246,9 @@ fn count(nodes: &[Node]) -> usize {
 /// Columns read left-to-right as work progresses, so they're coloured that way.
 fn guide_style(column: Column) -> Style {
     let spec = match column {
+        // The backlog is everything not yet committed to, so it reads as the
+        // quietest column rather than another stage of progress.
+        Column::Backlog => "bright_black",
         Column::Todo => "blue",
         Column::Doing => "yellow",
         Column::Done => "green",

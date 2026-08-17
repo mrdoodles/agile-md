@@ -110,7 +110,7 @@ pub fn switch_branch(repo: &Path, name: &str, create: bool) -> Result<()> {
 }
 
 /// Drop a file from the index while leaving it on disk. Used when a ticket is
-/// junked: the junk directory is gitignored, so `git mv` would refuse, and the
+/// archived: the archive is gitignored, so `git mv` would refuse, and the
 /// history should record the ticket leaving the board.
 pub fn untrack(repo: &Path, file: &Path) -> Result<()> {
     let status = Command::new("git")

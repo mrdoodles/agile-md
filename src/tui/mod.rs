@@ -750,7 +750,11 @@ impl App {
 
         let [board, footer] =
             Layout::vertical([Constraint::Min(3), Constraint::Length(1)]).areas(frame.area());
-        let columns = Layout::horizontal([Constraint::Ratio(1, 3); 3]).split(board);
+        // Derived from Column::ALL, not a literal: adding the backlog left the
+        // hardcoded three-way split drawing one column short.
+        let share = Column::ALL.len() as u32;
+        let columns =
+            Layout::horizontal(vec![Constraint::Ratio(1, share); Column::ALL.len()]).split(board);
         for (index, area) in columns.iter().enumerate() {
             self.column_areas[index] = *area;
             // Lifted out and put back so the column and its state can be
@@ -1097,6 +1101,7 @@ fn labels(card: &Card) -> String {
 /// three colours, so a theme changes them too.
 fn column_colour(column: Column, palette: &ThemePalette) -> Color {
     match column {
+        Column::Backlog => palette.muted,
         Column::Todo => palette.info,
         Column::Doing => palette.warning,
         Column::Done => palette.success,
@@ -1237,15 +1242,21 @@ mod board_tests {
     #[test]
     fn a_column_scrolls_to_keep_the_selection_in_view() {
         let (_dir, mut app) = app(20);
+        // Name the column rather than counting to it: the fixture fills todo,
+        // and the backlog now sits to its left.
+        let todo = Column::Todo as usize;
+        // Only the focused column scrolls, and focus starts at the leftmost —
+        // which is the backlog now, not todo.
+        app.column = todo;
         // Nine rows of list in a twelve-row terminal, so this is off-screen.
-        app.selected[0] = 15;
-        let screen = draw(&mut app, 100, 12);
+        app.selected[todo] = 15;
+        let screen = draw(&mut app, 132, 12);
         assert!(
             screen.contains("Ticket 16"),
             "the selection has to be visible"
         );
         assert!(
-            app.list_states[0].offset() > 0,
+            app.list_states[todo].offset() > 0,
             "the column should have scrolled"
         );
     }
@@ -1253,16 +1264,18 @@ mod board_tests {
     #[test]
     fn a_click_lands_on_the_ticket_under_the_pointer_not_the_row_number() {
         let (_dir, mut app) = app(20);
-        app.selected[0] = 15;
-        draw(&mut app, 100, 12);
-        let offset = app.list_states[0].offset();
+        let todo = Column::Todo as usize;
+        app.column = todo;
+        app.selected[todo] = 15;
+        draw(&mut app, 132, 12);
+        let offset = app.list_states[todo].offset();
         assert!(offset > 0, "this only means anything once it has scrolled");
 
         // The top row of the list, just inside the border.
-        let area = app.column_areas[0];
+        let area = app.column_areas[todo];
         app.click(Position::new(area.x + 2, area.y + 1));
         assert_eq!(
-            app.selected[0], offset,
+            app.selected[todo], offset,
             "clicking the first visible row selects the ticket shown there"
         );
     }
