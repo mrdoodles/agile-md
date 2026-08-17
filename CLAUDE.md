@@ -116,6 +116,18 @@ bash install.sh [--dir DIR]
 - The word "task" still means a *work item* throughout (comments, `find_task`);
   only the command is named `amd`.
 
+## Status
+
+The bash implementation is **no longer maintained**; `v5.0.0` is its final
+release. The tags stay published and existing installs keep working, so don't
+break the `v5` major tag or the installer — but new work goes to the Rust
+implementation on `rust/gui-board`, which has the desktop board, epics and
+sprints, points and ordering.
+
+Boards are compatible: same columns, same ticket files. The CLIs are not —
+`amd doing` there is `amd start`, and `amd set` takes different fields — so
+don't copy invocations between them.
+
 ## Versioning & releasing (no release workflow — do it by hand)
 
 Cut releases manually: `git tag -a vX.Y.Z`, force-move the major tag
@@ -133,7 +145,7 @@ update the `RAW=.../agile-md/vN` line in `install.sh` and the `curl` URL in
 - **v5** — `backlog/` added as the first column and `amd new` creates there
   rather than in `todo/`; `amd todo <ref>` promotes. Existing boards gain the
   directory automatically, but anything scripted against `tasks/todo/NNN-*.md`
-  right after `amd new` breaks.
+  right after `amd new` breaks. **The last release of the bash line.**
 
 ## Conventions
 

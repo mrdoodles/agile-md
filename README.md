@@ -1,5 +1,17 @@
 # agile-md
 
+> **The bash implementation is no longer maintained.** `v5.0.0` is its last
+> release. It still works and the tags stay published, so existing installs and
+> the `curl` command below keep doing exactly what they did — but nothing
+> further is being added or fixed here.
+>
+> Development continues on the Rust implementation, on the
+> [`rust/gui-board`](https://github.com/mrdoodles/agile-md/tree/rust/gui-board)
+> branch: the same markdown-on-disk board, with a desktop board and a fuller
+> command line (epics, sprints, points, ordering). Boards are compatible — the
+> columns and ticket files are the same — but the commands are not: `amd doing`
+> is `amd start` there, and `amd set` takes different fields.
+
 A tiny **filesystem Kanban** — tasks are markdown files moved between `backlog/`,
 `todo/`, `doing/` and `done/` directories. Pure `bash` + `git`, no JavaScript,
 no runtime.
