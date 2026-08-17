@@ -19,12 +19,17 @@ The crate is a **library plus a binary**, so the CLI and the terminal UI share
 one implementation of the board.
 
 - `src/lib.rs` — the library: `board`, `branch`, `create`, `git`, `render`,
-  `task`, `templates` (and `tui` behind the default feature).
+  `task`, `templates` (and `gui` behind the default feature).
 - `src/create.rs` — making a ticket, split into `Draft::prepare` (resolve and
   render, touching nothing) and `Draft::write` (file, child link, backlinks).
   That gap is what lets the CLI put the rendered ticket in `$EDITOR` before
-  anything is written, while the TUI writes what it already has.
-- `src/tui/` — the terminal UI (feature `tui`, on by default) and its settings.
+  anything is written, while the desktop board writes what it already has.
+- `src/gui/` — the desktop board (feature `gui`, on by default): egui/eframe,
+  the same stack as rustmark. `richtext.rs` edits a body line by line;
+  `settings.rs` holds the text size and colour scheme.
+- `src/group.rs` — epics and sprints: the folders a backlog is divided into.
+- `src/settings.rs` — the shared config file, which keeps keys it does not
+  recognise so one writer cannot delete another's.
 - `src/main.rs` — clap CLI and command handlers; the binary also owns
   `form.rs`, `value.rs` and `completions.rs`, which are CLI-only.
 - `src/board.rs` — board discovery (`<repo-root>/${AMD_DIR:-tasks}`), the
@@ -138,7 +143,7 @@ one implementation of the board.
   escape sequences have no business in a pipe. Note this is why the board moved
   off `richrs::Table` — a table measures cell widths and would count the escape
   bytes, misaligning every border. (`richrs` draws the one-shot `amd board`
-  printout only; the interactive board is ratatui.)
+  printout only; the interactive board is egui.)
 - A rendering failure falls back to plain output rather than erroring: never
   let cosmetics stop someone seeing the board.
 
@@ -204,40 +209,14 @@ one implementation of the board.
   what's on the list must not add to it, and both have to work outside a repo.
   That bug shipped for one commit and the CLI suite now covers it.
 - `Registry::boards()` always includes the repository you're standing in, listed
-  or not — you should never open the TUI and not see the board you're in.
+  or not — you should never open the board and not see the one you're in.
 - Ids restart at 001 in every repository, so a `Card` carries which repo it came
-  from; the TUI shows the name whenever more than one board is in view, and a
-  move goes through *that* repository's `Board`, not the current one.
+  from; the board shows the name whenever more than one is in view, and a move
+  goes through *that* repository's `Board`, not the current one. A drag between
+  repositories is refused: the ticket would need a new id, not a rename.
 - `load_from`/`save_to` take a path, so tests need no environment mutation. The
   CLI suite sets `XDG_CONFIG_HOME` to a temp dir — `amd repos add` writes to the
   config directory and a test must never touch the user's.
-
-## The terminal UI (`src/tui/`)
-
-The only front end, and a **default feature** — a build that cannot show you the
-board is not much use. `--no-default-features` leaves the CLI for CI and
-scripts. Windowed front ends were tried and dropped: a terminal UI costs 2 MB
-resident and no idle CPU, works over SSH, and needs no windowing stack. Don't
-reintroduce one without a reason that outweighs that.
-
-- It owns no board logic: `Draft` creates, `Board::move_task` moves,
-  `render::column_forest`/`flatten` nests. Editing hands over to `$EDITOR`
-  around `leave()`/`enter()` rather than reimplementing an editor in a list.
-- **Mouse capture** is enabled after `ratatui::init()` and *disabled before*
-  `ratatui::restore()` — the other order leaves the shell receiving escape
-  sequences. The same pair wraps the `$EDITOR` handoff.
-- Clicks resolve against the areas recorded during the last `draw()`
-  (`column_areas`, `settings_area`, `dialog_area`), which is why `draw` takes
-  `&mut self`. `row_in()` accounts for the widget border.
-- **Themes** come from `ratatui-themes`; every colour is a palette lookup, so
-  none are hard-coded. The settings dialog previews as you move and restores the
-  old theme on `esc`. `settings.rs` persists one line to
-  `$XDG_CONFIG_HOME/agile-md/config`, treating anything unreadable as defaults.
-  Its `load_from`/`save_to` take a path so the tests need no environment
-  mutation — two tests racing on `XDG_CONFIG_HOME` is how that started.
-- Testing works through a pty: `script -q /dev/null bash -c "stty rows 40 cols
-  130; amd tui"` with timed keystrokes, including SGR mouse sequences. Without
-  the `stty` the pty has no size and ratatui draws into a zero-height screen.
 
 ## Completions
 
@@ -299,6 +278,23 @@ changes):
   Install downloads a prebuilt binary instead of copying a script. The v3 CLI and board
   layout still work; v3 task files simply have no labels, so `amd start` on one
   leaves the branch alone.
+
+## The desktop board (`src/gui/`)
+
+- egui/eframe, the same stack as rustmark, so the two look alike and a ticket
+  body could be handed to it. `App::ui` takes a `&mut Ui`, not a context —
+  0.36 moved panels onto `Ui`.
+- Drops are collected during the frame and applied after it, so the UI never
+  mutates files mid-draw, and every one goes through `Board::move_task` or
+  `Board::set_epic` — the same calls the CLI makes. The GUI must never write a
+  task file itself.
+- `dnd_drag_source` senses drag only, so opening a ticket needs its own click
+  interaction over the card's rect.
+- Ordering is an `order` key, ranked fractionally: a card dropped between two
+  others takes the midpoint, so one drag rewrites one file. **It is read by the
+  board only** — `amd ls` still sorts by id, which is a real inconsistency.
+- Errors from a save go to the status line *behind* the modal, so a failure
+  reads as "the button does nothing". See ticket 025.
 
 ## Conventions
 

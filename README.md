@@ -101,7 +101,7 @@ amd assign 3                          # unassign it
 ```
 
 Tickets are meant to be created now and assigned later, so `assignee` starts
-empty. It shows on the board as `@sam`, and in the TUI `a` narrows the board to
+empty. It shows on the board as `@sam`, and `amd ls --assignee` narrows to
 one person. Who *created* a ticket isn't a field — `git log --follow` on the
 file already knows.
 
@@ -145,8 +145,8 @@ the list doesn't add to it. A removed repository comes back the next time you
 work in it; `AMD_NO_REGISTER=1` keeps the list entirely manual, and then removal
 sticks.
 
-In the TUI, `p` picks a repository (or all of them) and `a` picks an assignee
-(or everyone, or unassigned). With more than one board in view each card says
+On the desktop board a checkbox per repository says which are in view, and the
+backlog shows one at a time. With more than one board in view each card says
 which repository it came from, since ids restart at 001 in every repo.
 
 The registry is a **list of repositories, and nothing else** — one path per line
@@ -174,46 +174,37 @@ amd assign 3                          # unassign it
 The name lands in the ticket's frontmatter (`assignee: "sam"`) and shows on the
 board as `@sam`, so it moves with the file and is visible in the diff.
 
-## The terminal UI
+## The desktop board
 
-`amd tui` opens the board full-screen in the terminal — the only front end, and
-the one that costs nothing to leave open (2 MB resident, no CPU while idle, and
-it works over SSH):
-
-```
-┌ TODO  (3) ────────────┐┌ DOING  (1) ───────────┐┌ DONE  (0) ────────────┐
-│ [001] Checkout revamp ││ [004] Fix the thing   ││ (empty)               │
-│   [002] Guest checkout││                       ││                       │
-│ [003] Renew certs  ad ││                       ││                       │
-└───────────────────────┘└───────────────────────┘└───────────────────────┘
-j/k move  h/l column  [ ] shift  enter view  e edit  n new  p repo  a assignee  s settings  q quit
-```
-
-| | |
-| --- | --- |
-| `j`/`k`, `h`/`l` | move within and between columns (arrows work too) |
-| `[` `]` | shift the selected ticket a column left or right |
-| `enter` | read the ticket; `e` opens it in `$EDITOR` |
-| `n` | new ticket — a title and a type, nothing else to fill in |
-| `p` | which repository (or all of them) |
-| `a` | whose tickets (or everyone's, or unassigned) |
-| `s` | settings |
-| `r`, `q` | reload, quit |
-
-**The mouse works**: click a ticket to select it, click it again to open it,
-scroll to move through a column, and click **settings** in the bottom-right.
-
-**Themes** come from [ratatui-themes](https://crates.io/crates/ratatui-themes)
-— Dracula, Nord, Gruvbox, Catppuccin and the rest. The settings dialog previews
-each one as you move through the list, `enter` keeps it and `esc` puts the old
-one back. Your choice is remembered in `~/.config/agile-md/config`:
+`amd gui` opens the board in a window, across every registered repository at
+once:
 
 ```
-theme = nord
+BACKLOG (4)      TODO (3)         DOING (1)        DONE (7)
+┌──────────────┐ ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
+│ [017] 2pt    │ │ [001]   @sam │ │ [004]        │ │ [006]        │
+│ Add repo…    │ │ Checkout…    │ │ Fix the…     │ │ Completions  │
+└──────────────┘ └──────────────┘ └──────────────┘ └──────────────┘
 ```
 
-The TUI is a default feature; `--no-default-features` builds the CLI alone,
-which is what CI and scripts want.
+- **Drag a card** up or down to reorder it, across to change its status. Both
+  are written straight to disk — the move is a `git mv`, the order is an
+  `order` key in the ticket.
+- **Double click** a ticket to edit it: title, assignee, points and body. The
+  body is rich text with an **MD/RT** toggle, click any line to type into it,
+  checkboxes tick in place, and Enter continues a list.
+- **Board / Backlog** switches views. The backlog groups tickets by epic and
+  sprint, with **Add epic** and **Add sprint**.
+- **Settings** holds the text size (standard, medium, large) and the colour
+  scheme, both remembered in `~/.config/agile-md/config`.
+
+A **sprint** takes only sized tickets — an unsized one would make its point
+total a lie — and once started it takes nothing more and gives nothing back.
+An **epic** takes anything: it is where work goes before anyone has estimated
+it.
+
+The board is a default feature; `--no-default-features` builds the command line
+alone, which is what CI and scripts want.
 
 ## Shell completion
 

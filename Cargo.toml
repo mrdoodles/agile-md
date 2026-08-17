@@ -30,8 +30,6 @@ time = { version = "0.3", features = ["formatting", "local-offset", "macros"] }
 
 # GUI only — see the [features] section.
 clap_complete = "4"
-ratatui = { version = "0.30", optional = true }
-ratatui-themes = { version = "0.3", optional = true }
 
 # Desktop GUI — the same stack as rustmark, so the two look and feel alike
 # and a ticket body can be handed straight to it.
@@ -46,17 +44,14 @@ libc = "0.2.189"
 deunicode = "1.6.2"
 
 [features]
-# Both front ends are on by default: a build that cannot show you the board is
-# not what anyone wants from `cargo run`. `--no-default-features` drops both
-# and leaves the CLI, which is what CI and scripts use.
-default = ["tui", "gui"]
-tui = ["dep:ratatui", "dep:ratatui-themes"]
-# The desktop board. Costs a windowing stack at build time, which is why it is
-# still a feature rather than unconditional.
+# The desktop board is on by default: a build that cannot show you the board
+# is not what anyone wants from `cargo run`. `--no-default-features` drops it
+# and leaves the command line on its own, which is what CI and scripts use and
+# what keeps a windowing stack out of a headless build.
+default = ["gui"]
 gui = ["dep:eframe", "dep:egui"]
 
 [dev-dependencies]
-ratatui = "0.30"
 tempfile = "3"
 
 [profile.release]

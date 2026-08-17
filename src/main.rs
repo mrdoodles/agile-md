@@ -152,8 +152,6 @@ enum Cmd {
         #[arg(long)]
         one_way: bool,
     },
-    /// Open the board in the terminal
-    Tui,
     /// Open the desktop board across every registered repository
     Gui,
     /// Print a shell completion script (bash, zsh, fish, …)
@@ -353,7 +351,6 @@ fn run() -> Result<()> {
             let task = resolve(&board, task, "edit", &Column::ALL)?;
             open_editor(&task.path)
         }
-        Cmd::Tui => cmd_tui(board),
         Cmd::Assign { task, who } => {
             let task = resolve(&board, Some(task), "assign", &Column::ALL)?;
             let who = resolve_assignee(who.as_deref());
@@ -447,16 +444,6 @@ fn cmd_link(board: &Board, reference: &str, to: &[String], one_way: bool) -> Res
         }
     }
     Ok(())
-}
-
-#[cfg(feature = "tui")]
-fn cmd_tui(board: Board) -> Result<()> {
-    agile_md::tui::run(board)
-}
-
-#[cfg(not(feature = "tui"))]
-fn cmd_tui(_board: Board) -> Result<()> {
-    bail!("this build has no TUI — rebuild with --features tui")
 }
 
 #[cfg(feature = "gui")]

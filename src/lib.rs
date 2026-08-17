@@ -4,9 +4,9 @@
 //! `<repo-root>/tasks`. Status is the folder; `git mv` is the audit trail; the
 //! ticket format is a MiniJinja template you can edit.
 //!
-//! The crate is a library so that the `amd` CLI and the terminal UI share one
-//! implementation: creating a ticket, moving it and rendering the board all
-//! live here, and the front ends only decide how to ask and how to draw.
+//! The crate is a library so that the `amd` CLI and the desktop board share
+//! one implementation: creating a ticket, moving it and rendering the board
+//! all live here, and the front ends only decide how to ask and how to draw.
 
 pub mod board;
 pub mod branch;
@@ -21,5 +21,3 @@ pub mod templates;
 
 #[cfg(feature = "gui")]
 pub mod gui;
-#[cfg(feature = "tui")]
-pub mod tui;
