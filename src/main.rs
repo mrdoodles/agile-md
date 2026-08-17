@@ -152,10 +152,9 @@ enum Cmd {
         #[arg(long)]
         one_way: bool,
     },
-    /// Open the board in the terminal (needs the `tui` feature)
+    /// Open the board in the terminal
     Tui,
-    /// Open the desktop board across every registered repository (needs the
-    /// `gui` feature)
+    /// Open the desktop board across every registered repository
     Gui,
     /// Print a shell completion script (bash, zsh, fish, …)
     Completions {

@@ -46,13 +46,13 @@ libc = "0.2.189"
 deunicode = "1.6.2"
 
 [features]
-# The terminal front end is on by default: it's the only one, and a build
-# without it can't show you the board. `--no-default-features` drops it and
-# leaves the CLI, which is what CI and scripts use.
-default = ["tui"]
+# Both front ends are on by default: a build that cannot show you the board is
+# not what anyone wants from `cargo run`. `--no-default-features` drops both
+# and leaves the CLI, which is what CI and scripts use.
+default = ["tui", "gui"]
 tui = ["dep:ratatui", "dep:ratatui-themes"]
-# The desktop board. Off by default: it drags in a windowing stack, and CI and
-# scripts only ever want the CLI.
+# The desktop board. Costs a windowing stack at build time, which is why it is
+# still a feature rather than unconditional.
 gui = ["dep:eframe", "dep:egui"]
 
 [dev-dependencies]
