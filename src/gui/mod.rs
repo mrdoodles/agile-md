@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use anyhow::{Result, anyhow};
 
 use crate::board::{Board, Column};
+use crate::group::{DEFAULT_DAYS, Group, Kind, State};
 use crate::registry::Registry;
 use crate::task::Task;
 
@@ -55,9 +56,9 @@ struct RepoBoard {
     name: String,
     board: Board,
     lanes: Vec<Vec<Card>>,
-    /// Backlog tickets grouped by epic folder. `None` is the loose backlog —
-    /// everything not filed under an epic yet.
-    groups: Vec<(Option<String>, Vec<Card>)>,
+    /// Backlog tickets grouped by folder. `None` is the loose backlog —
+    /// everything not filed under an epic or sprint yet.
+    groups: Vec<(Option<Group>, Vec<Card>)>,
     visible: bool,
 }
 
@@ -75,6 +76,19 @@ struct Draft {
     title: String,
     epic: Option<String>,
     points: String,
+}
+
+/// An epic or sprint being created or edited. The same overlay does both:
+/// creating differs only in that the name is still editable.
+struct GroupDraft {
+    repo: usize,
+    kind: Kind,
+    /// `None` while creating; the existing directory name when editing.
+    editing: Option<String>,
+    name: String,
+    description: String,
+    days: String,
+    state: State,
 }
 
 /// The ticket open in the editor overlay. Holds its own copy of the fields, so
@@ -109,6 +123,7 @@ pub struct BoardApp {
     status: Option<String>,
     editing: Option<Editor>,
     drafting: Option<Draft>,
+    group_draft: Option<GroupDraft>,
     view: View,
     /// Which repository the backlog view is showing. The board view stacks
     /// every repository; the backlog is long enough that one at a time reads
@@ -148,6 +163,7 @@ impl BoardApp {
             status: None,
             editing: None,
             drafting: None,
+            group_draft: None,
             view: View::Board,
             backlog_repo: 0,
         })
@@ -267,16 +283,16 @@ impl BoardApp {
 /// The backlog, split into the loose tickets and one group per epic folder.
 /// The loose group comes first and is always present, so there is somewhere to
 /// drop a ticket you want to take *out* of an epic.
-fn read_groups(board: &Board) -> Result<Vec<(Option<String>, Vec<Card>)>> {
+fn read_groups(board: &Board) -> Result<Vec<(Option<Group>, Vec<Card>)>> {
     let all = board.tasks_in(Column::Backlog)?;
-    let mut groups: Vec<(Option<String>, Vec<Card>)> = vec![(None, Vec::new())];
-    for epic in board.epics_in(Column::Backlog)? {
-        groups.push((Some(epic), Vec::new()));
+    let mut groups: Vec<(Option<Group>, Vec<Card>)> = vec![(None, Vec::new())];
+    for group in board.groups()? {
+        groups.push((Some(group), Vec::new()));
     }
     for task in all {
         let slot = groups
             .iter_mut()
-            .find(|(name, _)| name.as_deref() == task.epic.as_deref());
+            .find(|(group, _)| group.as_ref().map(|g| g.name.as_str()) == task.epic.as_deref());
         if let Some((_, cards)) = slot {
             cards.push(card_from(task));
         }
@@ -352,6 +368,21 @@ impl eframe::App for BoardApp {
                     }
                 }
                 ui.separator();
+                if self.view == View::Backlog {
+                    for (kind, label) in [(Kind::Epic, "Add epic"), (Kind::Sprint, "Add sprint")] {
+                        if ui.button(label).clicked() {
+                            self.group_draft = Some(GroupDraft {
+                                repo: self.backlog_repo,
+                                kind,
+                                editing: None,
+                                name: String::new(),
+                                description: String::new(),
+                                days: DEFAULT_DAYS.to_string(),
+                                state: State::Pending,
+                            });
+                        }
+                    }
+                }
                 if ui.button("New ticket").clicked() {
                     let repo = match self.view {
                         View::Backlog => self.backlog_repo,
@@ -375,6 +406,8 @@ impl eframe::App for BoardApp {
         });
 
         let mut refile: Option<(PathBuf, usize, Option<String>)> = None;
+        let mut group_edit: Option<String> = None;
+        let mut group_start: Option<String> = None;
 
         egui::CentralPanel::default().show(ui, |ui| {
             egui::ScrollArea::both().show(ui, |ui| match self.view {
@@ -402,10 +435,16 @@ impl eframe::App for BoardApp {
                     let index = self.backlog_repo.min(self.repos.len() - 1);
                     let repo = &self.repos[index];
                     ui.horizontal_top(|ui| {
-                        for (epic, cards) in &repo.groups {
-                            if let Some(target) =
-                                group_ui(ui, epic.as_deref(), cards, index, &mut opened)
-                            {
+                        for (group, cards) in &repo.groups {
+                            if let Some(target) = group_ui(
+                                ui,
+                                group.as_ref(),
+                                cards,
+                                index,
+                                &mut opened,
+                                &mut group_edit,
+                                &mut group_start,
+                            ) {
                                 refile = Some(target);
                             }
                         }
@@ -416,6 +455,14 @@ impl eframe::App for BoardApp {
 
         self.editor_ui(ui.ctx());
         self.draft_ui(ui.ctx());
+        self.group_ui(ui.ctx());
+
+        if let Some(name) = group_edit {
+            self.open_group(&name);
+        }
+        if let Some(name) = group_start {
+            self.start_sprint(&name);
+        }
 
         if let Some((path, repo, epic)) = refile {
             self.refile(&path, repo, epic);
@@ -444,6 +491,160 @@ impl eframe::App for BoardApp {
     }
 }
 
+/// Creating and editing an epic or a sprint. One overlay for both, because
+/// they differ in two fields, not in kind of thing.
+#[cfg(feature = "gui")]
+impl BoardApp {
+    fn open_group(&mut self, name: &str) {
+        match self.repos[self.backlog_repo].board.group(name) {
+            Ok(group) => {
+                self.group_draft = Some(GroupDraft {
+                    repo: self.backlog_repo,
+                    kind: group.kind,
+                    editing: Some(group.name.clone()),
+                    name: group.name,
+                    description: group.description,
+                    days: group.days.to_string(),
+                    state: group.state,
+                });
+            }
+            Err(err) => self.status = Some(format!("{err}")),
+        }
+    }
+
+    fn start_sprint(&mut self, name: &str) {
+        let outcome = (|| -> Result<()> {
+            let mut group = self.repos[self.backlog_repo].board.group(name)?;
+            group.start()
+        })();
+        match outcome {
+            Ok(()) => self.status = None,
+            Err(err) => self.status = Some(format!("{err}")),
+        }
+        self.reload();
+    }
+
+    fn group_ui(&mut self, ctx: &egui::Context) {
+        let Some(draft) = &mut self.group_draft else {
+            return;
+        };
+
+        let mut apply = false;
+        let mut cancel = false;
+        let creating = draft.editing.is_none();
+        let is_sprint = draft.kind == Kind::Sprint;
+        let started = draft.state == State::Started;
+        let noun = draft.kind.as_str();
+
+        let modal = egui::Modal::new(egui::Id::new("group-editor")).show(ctx, |ui| {
+            ui.set_width(460.0);
+            ui.heading(if creating {
+                format!("New {noun}")
+            } else {
+                format!("Edit {noun}")
+            });
+            ui.separator();
+
+            egui::Grid::new("group-fields")
+                .num_columns(2)
+                .spacing([8.0, 6.0])
+                .show(ui, |ui| {
+                    ui.label("Name");
+                    // The name is the directory, so renaming would move every
+                    // ticket in it and orphan the `epic` each one records.
+                    ui.add_enabled(
+                        creating,
+                        egui::TextEdit::singleline(&mut draft.name)
+                            .desired_width(f32::INFINITY)
+                            .hint_text("checkout"),
+                    );
+                    ui.end_row();
+
+                    ui.label("Description");
+                    ui.add(
+                        egui::TextEdit::multiline(&mut draft.description)
+                            .desired_width(f32::INFINITY)
+                            .desired_rows(3),
+                    );
+                    ui.end_row();
+
+                    if is_sprint {
+                        ui.label("Days");
+                        ui.add_enabled(
+                            !started,
+                            egui::TextEdit::singleline(&mut draft.days).desired_width(60.0),
+                        );
+                        ui.end_row();
+
+                        ui.label("State");
+                        if started {
+                            ui.label(egui::RichText::new("started — cannot be undone").strong());
+                        } else {
+                            ui.weak("pending (start it from the board)");
+                        }
+                        ui.end_row();
+                    }
+                });
+
+            ui.separator();
+            ui.horizontal(|ui| {
+                let named = !draft.name.trim().is_empty();
+                apply = ui
+                    .add_enabled(
+                        named,
+                        egui::Button::new(if creating { "Create" } else { "Save" }),
+                    )
+                    .clicked();
+                cancel = ui.button("Cancel").clicked();
+                if is_sprint && !started {
+                    ui.weak("only sized tickets can go in a sprint");
+                }
+            });
+        });
+
+        if apply {
+            self.save_group();
+        } else if cancel || modal.should_close() {
+            self.group_draft = None;
+        }
+    }
+
+    fn save_group(&mut self) {
+        let Some(draft) = &self.group_draft else {
+            return;
+        };
+        let repo = draft.repo;
+        let creating = draft.editing.is_none();
+        let group = Group {
+            dir: self.repos[repo]
+                .board
+                .dir(Column::Backlog)
+                .join(draft.name.trim()),
+            name: draft.name.trim().to_string(),
+            kind: draft.kind,
+            description: draft.description.trim().to_string(),
+            days: draft.days.trim().parse().unwrap_or(DEFAULT_DAYS),
+            state: draft.state,
+        };
+
+        let board = &self.repos[repo].board;
+        let outcome = if creating {
+            board.create_group(&group)
+        } else {
+            group.save()
+        };
+
+        match outcome {
+            Ok(()) => {
+                self.status = None;
+                self.group_draft = None;
+                self.reload();
+            }
+            Err(err) => self.status = Some(format!("{err}")),
+        }
+    }
+}
+
 /// The new-ticket overlay. Creating from the board is a deliberate act, so it
 /// asks for the few things worth deciding up front and leaves the body to the
 /// editor.
@@ -456,10 +657,14 @@ impl BoardApp {
 
         let mut create = false;
         let mut cancel = false;
+        // A sprint only takes sized tickets, so offering one here would create
+        // a ticket the board then refuses to file. Epics take anything.
         let epics = self.repos[draft.repo]
             .groups
             .iter()
-            .filter_map(|(epic, _)| epic.clone())
+            .filter_map(|(group, _)| group.as_ref())
+            .filter(|group| group.accepts_changes() && !group.is_sprint())
+            .map(|group| group.name.clone())
             .collect::<Vec<_>>();
         let repo_name = self.repos[draft.repo].name.clone();
 
@@ -641,12 +846,16 @@ impl BoardApp {
 #[cfg(feature = "gui")]
 fn group_ui(
     ui: &mut egui::Ui,
-    epic: Option<&str>,
+    group: Option<&Group>,
     cards: &[Card],
     repo_index: usize,
     opened: &mut Option<PathBuf>,
+    edit: &mut Option<String>,
+    start: &mut Option<String>,
 ) -> Option<(PathBuf, usize, Option<String>)> {
-    let heading = epic.unwrap_or("(no epic)");
+    let heading = group.map_or("(unfiled)", |group| group.name.as_str());
+    // Only sized tickets count, and a sprint refuses unsized ones, so its
+    // total is the whole of what it committed to.
     let points: i64 = cards
         .iter()
         .filter_map(|card| card.points.as_deref())
@@ -662,12 +871,48 @@ fn group_ui(
         ui.vertical(|ui| {
             ui.set_width(COLUMN_WIDTH);
             ui.set_min_height(160.0);
-            let label = if points > 0 {
-                format!("{}  ({}, {points} pts)", heading, cards.len())
-            } else {
-                format!("{}  ({})", heading, cards.len())
-            };
-            ui.label(egui::RichText::new(label).monospace().strong());
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(format!("{heading}  ({})", cards.len()))
+                        .monospace()
+                        .strong(),
+                );
+                if let Some(group) = group {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.small_button("edit").clicked() {
+                            *edit = Some(group.name.clone());
+                        }
+                    });
+                }
+            });
+
+            if let Some(group) = group {
+                if group.is_sprint() {
+                    ui.horizontal(|ui| {
+                        ui.weak(format!("sprint · {}d · {points} pts", group.days));
+                        match group.state {
+                            State::Pending => {
+                                if ui.small_button("start").clicked() {
+                                    *start = Some(group.name.clone());
+                                }
+                            }
+                            // No control to undo it: the flag is one way.
+                            State::Started => {
+                                ui.label(egui::RichText::new("started").strong());
+                            }
+                        }
+                    });
+                } else if points > 0 {
+                    ui.weak(format!("epic · {points} pts"));
+                } else {
+                    ui.weak("epic");
+                }
+                if !group.description.is_empty() {
+                    ui.weak(&group.description);
+                }
+            }
+            ui.separator();
+
             for card in cards {
                 if card_ui(ui, card, repo_index) {
                     *opened = Some(card.task.path.clone());
@@ -680,8 +925,13 @@ fn group_ui(
     });
 
     payload.and_then(|dragged| {
-        (dragged.repo == repo_index)
-            .then(|| (dragged.path.clone(), repo_index, epic.map(str::to_string)))
+        (dragged.repo == repo_index).then(|| {
+            (
+                dragged.path.clone(),
+                repo_index,
+                group.map(|group| group.name.clone()),
+            )
+        })
     })
 }
 

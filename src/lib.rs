@@ -12,6 +12,7 @@ pub mod board;
 pub mod branch;
 pub mod create;
 pub mod git;
+pub mod group;
 pub mod registry;
 pub mod render;
 pub mod task;

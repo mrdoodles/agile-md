@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, anyhow, bail};
 
 use crate::git;
+use crate::group::{GROUP_FILE, Group};
 use crate::task::Task;
 use crate::templates;
 
@@ -251,6 +252,9 @@ impl Board {
             let path = entry
                 .with_context(|| format!("reading {}", dir.display()))?
                 .path();
+            if path.file_name().and_then(|n| n.to_str()) == Some(GROUP_FILE) {
+                continue;
+            }
             if path.is_file()
                 && let Some(mut task) = Task::from_path(&path, column)
             {
@@ -261,10 +265,60 @@ impl Board {
         Ok(tasks)
     }
 
+    /// Every group in the backlog — epics and sprints alike — read from their
+    /// own directories.
+    pub fn groups(&self) -> Result<Vec<Group>> {
+        let mut groups = Vec::new();
+        for name in self.epics_in(Column::Backlog)? {
+            groups.push(Group::read(&self.dir(Column::Backlog).join(name))?);
+        }
+        Ok(groups)
+    }
+
+    /// Look one up by directory name.
+    pub fn group(&self, name: &str) -> Result<Group> {
+        let dir = self.dir(Column::Backlog).join(name);
+        if !dir.is_dir() {
+            bail!("no group called {name}");
+        }
+        Group::read(&dir)
+    }
+
+    /// Create an epic or a sprint. The directory name is the identity, so a
+    /// second group of the same name is a mistake rather than a merge.
+    pub fn create_group(&self, group: &Group) -> Result<()> {
+        if group.name.trim().is_empty() {
+            bail!("a group needs a name");
+        }
+        if group.dir.exists() {
+            bail!("{} already exists", group.name);
+        }
+        group.save()
+    }
+
     /// File a ticket under an epic, or move it back to the loose backlog with
     /// `None`. The folder is the move; the frontmatter is updated to match, so
     /// a ticket read on its own still says which epic it belongs to.
     pub fn set_epic(&self, task: &Task, epic: Option<&str>) -> Result<PathBuf> {
+        // Leaving a started sprint is as much a change as joining one: both
+        // rewrite what the sprint committed to.
+        if let Some(current) = task.epic.as_deref()
+            && let Ok(group) = self.group(current)
+            && !group.accepts_changes()
+        {
+            bail!("{} has started; its tickets are fixed", group.name);
+        }
+        if let Some(name) = epic {
+            let group = self.group(name)?;
+            if !group.accepts_changes() {
+                bail!("{name} has started; nothing more can be added");
+            }
+            // An unsized ticket in a sprint makes the sprint's total a lie,
+            // which is the one number a sprint is for.
+            if group.is_sprint() && task.points().is_none() {
+                bail!("{} needs points before it can go in {name}", task.stem);
+            }
+        }
         let dir = match epic {
             Some(name) => self.dir(Column::Backlog).join(name),
             None => self.dir(Column::Backlog),
@@ -508,11 +562,97 @@ mod tests {
         assert!(board.epics_in(Column::Todo).unwrap().is_empty());
     }
 
+    fn sprint(board: &Board, name: &str) -> crate::group::Group {
+        let group = crate::group::Group {
+            dir: board.dir(Column::Backlog).join(name),
+            name: name.to_string(),
+            kind: crate::group::Kind::Sprint,
+            description: String::new(),
+            days: crate::group::DEFAULT_DAYS,
+            state: crate::group::State::Pending,
+        };
+        board.create_group(&group).unwrap();
+        group
+    }
+
+    #[test]
+    fn a_sprint_refuses_an_unsized_ticket() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board_at(dir.path());
+        sprint(&board, "sprint-1");
+        backlog_ticket(&board, "001-unsized.md");
+
+        let task = board.find("001").unwrap();
+        let err = board.set_epic(&task, Some("sprint-1")).unwrap_err();
+        assert!(
+            err.to_string().contains("needs points"),
+            "unexpected: {err}"
+        );
+        assert!(task.path.exists(), "the ticket must not have moved");
+
+        // Sized, it goes in.
+        task.set_points("3").unwrap();
+        board.set_epic(&task, Some("sprint-1")).unwrap();
+        assert_eq!(board.find("001").unwrap().epic.as_deref(), Some("sprint-1"));
+    }
+
+    #[test]
+    fn an_epic_takes_unsized_tickets() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board_at(dir.path());
+        fs::create_dir_all(board.dir(Column::Backlog).join("checkout")).unwrap();
+        backlog_ticket(&board, "001-unsized.md");
+        let task = board.find("001").unwrap();
+        // Sizing is a sprint's requirement, not an epic's: an epic is where
+        // work goes before anyone has estimated it.
+        board.set_epic(&task, Some("checkout")).unwrap();
+        assert_eq!(board.find("001").unwrap().epic.as_deref(), Some("checkout"));
+    }
+
+    #[test]
+    fn a_started_sprint_takes_nothing_more_and_gives_nothing_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board_at(dir.path());
+        let mut group = sprint(&board, "sprint-1");
+        backlog_ticket(&board, "001-in.md");
+        backlog_ticket(&board, "002-out.md");
+
+        let inside = board.find("001").unwrap();
+        inside.set_points("5").unwrap();
+        board.set_epic(&inside, Some("sprint-1")).unwrap();
+        group.start().unwrap();
+
+        let outside = board.find("002").unwrap();
+        outside.set_points("2").unwrap();
+        let err = board.set_epic(&outside, Some("sprint-1")).unwrap_err();
+        assert!(err.to_string().contains("has started"), "unexpected: {err}");
+
+        // And what is in it cannot be taken out either.
+        let inside = board.find("001").unwrap();
+        let err = board.set_epic(&inside, None).unwrap_err();
+        assert!(err.to_string().contains("has started"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn the_group_file_is_not_a_ticket() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board_at(dir.path());
+        sprint(&board, "sprint-1");
+        let tasks = board.tasks_in(Column::Backlog).unwrap();
+        assert!(tasks.is_empty(), "_group.md must not count as a ticket");
+        assert_eq!(board.next_id().unwrap(), 1, "nor consume an id");
+    }
+
     #[test]
     fn filing_under_an_epic_moves_the_file_and_updates_the_ticket() {
         let dir = tempfile::tempdir().unwrap();
         let board = board_at(dir.path());
         backlog_ticket(&board, "001-loose.md");
+        // The group has to exist first: filing onto a name that isn't there
+        // would turn a typo into a new epic.
+        for name in ["checkout", "payments"] {
+            fs::create_dir_all(board.dir(Column::Backlog).join(name)).unwrap();
+        }
         let task = board.find("001").unwrap();
 
         let dest = board.set_epic(&task, Some("checkout")).unwrap();
