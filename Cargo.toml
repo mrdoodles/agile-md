@@ -32,6 +32,16 @@ time = { version = "0.3", features = ["formatting", "local-offset", "macros"] }
 clap_complete = "4"
 ratatui = { version = "0.30", optional = true }
 ratatui-themes = { version = "0.3", optional = true }
+
+# Desktop GUI — the same stack as rustmark, so the two look and feel alike
+# and a ticket body can be handed straight to it.
+eframe = { version = "0.36", default-features = false, features = [
+    "default_fonts",
+    "wgpu",
+    "wayland",
+    "x11",
+], optional = true }
+egui = { version = "0.36", optional = true }
 libc = "0.2.189"
 deunicode = "1.6.2"
 
@@ -41,6 +51,9 @@ deunicode = "1.6.2"
 # leaves the CLI, which is what CI and scripts use.
 default = ["tui"]
 tui = ["dep:ratatui", "dep:ratatui-themes"]
+# The desktop board. Off by default: it drags in a windowing stack, and CI and
+# scripts only ever want the CLI.
+gui = ["dep:eframe", "dep:egui"]
 
 [dev-dependencies]
 ratatui = "0.30"

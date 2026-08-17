@@ -17,5 +17,7 @@ pub mod render;
 pub mod task;
 pub mod templates;
 
+#[cfg(feature = "gui")]
+pub mod gui;
 #[cfg(feature = "tui")]
 pub mod tui;

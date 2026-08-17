@@ -154,6 +154,9 @@ enum Cmd {
     },
     /// Open the board in the terminal (needs the `tui` feature)
     Tui,
+    /// Open the desktop board across every registered repository (needs the
+    /// `gui` feature)
+    Gui,
     /// Print a shell completion script (bash, zsh, fish, …)
     Completions {
         /// Shell to generate for; defaults to $SHELL
@@ -289,6 +292,12 @@ fn run() -> Result<()> {
         return cmd_repos(command.unwrap_or(ReposCmd::List));
     }
 
+    // The desktop board draws every registered repository, so it must not
+    // insist on standing in one — `amd gui` works from anywhere.
+    if let Cmd::Gui = command {
+        return cmd_gui();
+    }
+
     // `init` is the one command that runs without an existing board.
     if let Cmd::Init = command {
         let board = Board::locate()?;
@@ -303,7 +312,7 @@ fn run() -> Result<()> {
     // use are all there next session without anyone curating them.
     agile_md::registry::remember(&board);
     match command {
-        Cmd::Init | Cmd::Completions { .. } | Cmd::Repos { .. } => {
+        Cmd::Init | Cmd::Completions { .. } | Cmd::Repos { .. } | Cmd::Gui => {
             unreachable!("handled above")
         }
         Cmd::New(args) => cmd_new(&board, args),
@@ -449,6 +458,16 @@ fn cmd_tui(board: Board) -> Result<()> {
 #[cfg(not(feature = "tui"))]
 fn cmd_tui(_board: Board) -> Result<()> {
     bail!("this build has no TUI — rebuild with --features tui")
+}
+
+#[cfg(feature = "gui")]
+fn cmd_gui() -> Result<()> {
+    agile_md::gui::run()
+}
+
+#[cfg(not(feature = "gui"))]
+fn cmd_gui() -> Result<()> {
+    bail!("this build has no desktop board — rebuild with --features gui")
 }
 
 /// The registry is a list of repositories, not a copy of their tickets: the

@@ -86,6 +86,28 @@ impl Task {
         fs::write(&self.path, updated).with_context(|| format!("writing {}", self.path.display()))
     }
 
+    /// Where the ticket sits within its column, for boards ordered by hand.
+    /// Absent means unranked, which sorts after everything ranked — the same
+    /// treatment an unset priority gets, so a board nobody has dragged still
+    /// reads in id order.
+    pub fn order(&self) -> Option<f64> {
+        self.meta("order")
+            .filter(|value| !value.is_empty())
+            .and_then(|value| value.trim().parse::<f64>().ok())
+    }
+
+    /// Rank the ticket within its column. Fractional on purpose: a card
+    /// dropped between two others takes the midpoint of its neighbours, so one
+    /// drag rewrites one file instead of renumbering the column — and two
+    /// branches that both reorder collide over one ticket rather than all.
+    pub fn set_order(&self, rank: f64) -> Result<()> {
+        let text = fs::read_to_string(&self.path)
+            .with_context(|| format!("reading {}", self.path.display()))?;
+        let updated = set_meta(&text, "order", &format!("\"{rank}\""))
+            .with_context(|| format!("updating {}", self.path.display()))?;
+        fs::write(&self.path, updated).with_context(|| format!("writing {}", self.path.display()))
+    }
+
     /// The branch type, if the ticket carries one. Falls back to the old
     /// `type` key.
     pub fn branch_type(&self) -> Option<String> {
@@ -381,6 +403,57 @@ mod tests {
         assert_eq!(parse_list("[003,007]"), ["003", "007"]);
         assert_eq!(parse_list("[ \"003\", 007 ]"), ["003", "007"]);
         assert_eq!(parse_list("[]"), [] as [String; 0]);
+    }
+
+    /// A task backed by a real file, so the read/write pair can be exercised.
+    fn ranked(dir: &std::path::Path, name: &str, body: &str) -> Task {
+        let path = dir.join(name);
+        fs::write(&path, body).unwrap();
+        Task::from_path(&path, Column::Todo).unwrap()
+    }
+
+    #[test]
+    fn order_reads_a_rank_and_survives_a_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let task = ranked(
+            dir.path(),
+            "001-a.md",
+            "---\nid: \"001\"\norder: \"1.5\"\n---\n\n## Notes\n",
+        );
+        assert_eq!(task.order(), Some(1.5));
+
+        task.set_order(0.75).unwrap();
+        assert_eq!(task.order(), Some(0.75));
+        let text = fs::read_to_string(&task.path).unwrap();
+        assert!(text.ends_with("## Notes\n"), "{text}");
+        assert_eq!(text.matches("order").count(), 1, "{text}");
+    }
+
+    #[test]
+    fn an_unranked_task_has_no_order() {
+        let dir = tempfile::tempdir().unwrap();
+        // Missing, empty and unparseable all mean "not ranked" rather than
+        // zero — a rank of 0 would sort a task to the front of its column.
+        for body in [
+            "---\nid: \"001\"\n---\n",
+            "---\nid: \"001\"\norder: \"\"\n---\n",
+            "---\nid: \"001\"\norder: \"soon\"\n---\n",
+        ] {
+            let task = ranked(dir.path(), "001-a.md", body);
+            assert_eq!(task.order(), None, "{body}");
+        }
+    }
+
+    #[test]
+    fn set_order_adds_the_key_when_the_task_predates_ordering() {
+        let dir = tempfile::tempdir().unwrap();
+        let task = ranked(dir.path(), "001-a.md", "---\nid: \"001\"\n---\n\nbody\n");
+        task.set_order(-1.0).unwrap();
+        assert_eq!(task.order(), Some(-1.0));
+        assert!(
+            fs::read_to_string(&task.path).unwrap().ends_with("body\n"),
+            "the body must survive"
+        );
     }
 
     #[test]
