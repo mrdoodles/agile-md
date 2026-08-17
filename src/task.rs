@@ -68,6 +68,42 @@ impl Task {
             .unwrap_or_else(|| self.stem.clone())
     }
 
+    /// Retitle the ticket. Only the frontmatter changes: the filename keeps
+    /// its original slug, because the id is what every reference uses and
+    /// renaming the file would break `git log --follow` for a cosmetic gain.
+    pub fn set_title(&self, title: &str) -> Result<()> {
+        let text = fs::read_to_string(&self.path)
+            .with_context(|| format!("reading {}", self.path.display()))?;
+        let updated = set_meta(&text, "title", &format!("{title:?}"))
+            .with_context(|| format!("updating {}", self.path.display()))?;
+        fs::write(&self.path, updated).with_context(|| format!("writing {}", self.path.display()))
+    }
+
+    /// Everything below the closing frontmatter fence — the part a human
+    /// actually writes.
+    pub fn body(&self) -> Result<String> {
+        let text = fs::read_to_string(&self.path)
+            .with_context(|| format!("reading {}", self.path.display()))?;
+        Ok(split_body(&text)
+            .map(|(_, body)| body.to_string())
+            .unwrap_or(text))
+    }
+
+    /// Replace the body, leaving the frontmatter exactly as it was.
+    pub fn set_body(&self, body: &str) -> Result<()> {
+        let text = fs::read_to_string(&self.path)
+            .with_context(|| format!("reading {}", self.path.display()))?;
+        let head = split_body(&text)
+            .map(|(head, _)| head.to_string())
+            .ok_or_else(|| anyhow::anyhow!("no frontmatter in {}", self.path.display()))?;
+        let mut out = head;
+        out.push_str(body);
+        if !out.ends_with('\n') {
+            out.push('\n');
+        }
+        fs::write(&self.path, out).with_context(|| format!("writing {}", self.path.display()))
+    }
+
     /// Who the ticket is assigned to, if anyone. Also reads `owner`, which the
     /// field was briefly called, so no board is left stranded.
     pub fn assignee(&self) -> Option<String> {
@@ -248,6 +284,17 @@ fn set_meta(text: &str, key: &str, value: &str) -> Result<String> {
 
 /// Search a task's frontmatter block (or, if it has none, the whole file) for
 /// the first `key: value` line.
+/// Split a task file into its frontmatter (fences included, trailing newline
+/// kept) and the body below it. `None` when there is no closing fence, so a
+/// half-written file is left alone rather than rewritten into nonsense.
+fn split_body(text: &str) -> Option<(&str, &str)> {
+    let rest = text.strip_prefix("---\n")?;
+    let end = rest.find("\n---\n")?;
+    // 1 for the newline the match starts with, 4 for "---\n".
+    let head_len = "---\n".len() + end + 1 + "---\n".len();
+    Some(text.split_at(head_len))
+}
+
 fn meta_in<'a>(text: &'a str, key: &str) -> Option<&'a str> {
     let mut lines = text.lines();
     let fenced = text.starts_with("---");
@@ -410,6 +457,50 @@ mod tests {
         let path = dir.join(name);
         fs::write(&path, body).unwrap();
         Task::from_path(&path, Column::Todo).unwrap()
+    }
+
+    #[test]
+    fn body_is_everything_below_the_frontmatter() {
+        let dir = tempfile::tempdir().unwrap();
+        let task = ranked(
+            dir.path(),
+            "001-a.md",
+            "---\nid: \"001\"\ntitle: \"A\"\n---\n\n## Notes\n\nwords\n",
+        );
+        assert_eq!(task.body().unwrap(), "\n## Notes\n\nwords\n");
+
+        task.set_body("\n## Notes\n\nrewritten\n").unwrap();
+        let text = fs::read_to_string(&task.path).unwrap();
+        assert!(
+            text.starts_with("---\nid: \"001\"\ntitle: \"A\"\n---\n"),
+            "{text}"
+        );
+        assert!(text.ends_with("rewritten\n"), "{text}");
+        // Editing the body must not disturb the frontmatter.
+        assert_eq!(task.title(), "A");
+    }
+
+    #[test]
+    fn a_file_without_a_closing_fence_is_left_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let task = ranked(dir.path(), "001-a.md", "---\nid: \"001\"\nno fence here\n");
+        assert!(task.set_body("new").is_err());
+    }
+
+    #[test]
+    fn set_title_changes_the_frontmatter_not_the_filename() {
+        let dir = tempfile::tempdir().unwrap();
+        let task = ranked(
+            dir.path(),
+            "001-old-slug.md",
+            "---\nid: \"001\"\ntitle: \"Old\"\n---\n\nbody\n",
+        );
+        task.set_title("Brand new title").unwrap();
+        assert_eq!(task.title(), "Brand new title");
+        // The slug is how history follows the file; renaming for a retitle
+        // would break `git log --follow` for no gain.
+        assert_eq!(task.stem, "001-old-slug");
+        assert!(task.path.exists());
     }
 
     #[test]

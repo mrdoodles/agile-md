@@ -57,9 +57,35 @@ struct RepoBoard {
     visible: bool,
 }
 
+/// The ticket open in the editor overlay. Holds its own copy of the fields, so
+/// closing without saving costs nothing and the board underneath keeps showing
+/// what is actually on disk.
+struct Editor {
+    repo: usize,
+    path: PathBuf,
+    id: String,
+    title: String,
+    assignee: String,
+    body: String,
+}
+
+impl Editor {
+    fn open(repo: usize, card: &Card) -> Result<Self> {
+        Ok(Self {
+            repo,
+            path: card.task.path.clone(),
+            id: card.id.clone(),
+            title: card.task.title(),
+            assignee: card.task.assignee().unwrap_or_default(),
+            body: card.task.body()?,
+        })
+    }
+}
+
 pub struct BoardApp {
     repos: Vec<RepoBoard>,
     status: Option<String>,
+    editing: Option<Editor>,
 }
 
 impl BoardApp {
@@ -91,6 +117,7 @@ impl BoardApp {
         Ok(Self {
             repos,
             status: None,
+            editing: None,
         })
     }
 
@@ -100,6 +127,34 @@ impl BoardApp {
                 Ok(lanes) => repo.lanes = lanes,
                 Err(err) => self.status = Some(format!("{err}")),
             }
+        }
+    }
+
+    /// Write the editor's fields back to the ticket. Each field goes through
+    /// the same call the CLI uses, so the GUI cannot invent a second way of
+    /// writing a task file.
+    fn save(&mut self) {
+        let Some(editor) = &self.editing else { return };
+        let outcome = (|| -> Result<()> {
+            let task = self.repos[editor.repo]
+                .lanes
+                .iter()
+                .flatten()
+                .find(|card| card.task.path == editor.path)
+                .map(|card| &card.task)
+                .ok_or_else(|| anyhow!("{} is no longer on the board", editor.path.display()))?;
+            task.set_title(&editor.title)?;
+            task.assign(&editor.assignee)?;
+            task.set_body(&editor.body)
+        })();
+
+        match outcome {
+            Ok(()) => {
+                self.status = None;
+                self.editing = None;
+                self.reload();
+            }
+            Err(err) => self.status = Some(format!("{err}")),
         }
     }
 
@@ -190,6 +245,7 @@ impl eframe::App for BoardApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let mut pending: Option<Drop> = None;
         let mut reload = false;
+        let mut opened: Option<PathBuf> = None;
 
         egui::Panel::top(egui::Id::new("repos")).show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
@@ -220,7 +276,8 @@ impl eframe::App for BoardApp {
                     }
                     ui.horizontal_top(|ui| {
                         for column in Column::ALL {
-                            if let Some(drop) = column_ui(ui, repo, repo_index, column) {
+                            if let Some(drop) = column_ui(ui, repo, repo_index, column, &mut opened)
+                            {
                                 pending = Some(drop);
                             }
                         }
@@ -230,10 +287,92 @@ impl eframe::App for BoardApp {
             });
         });
 
+        self.editor_ui(ui.ctx());
+
+        if let Some(path) = opened {
+            match self
+                .repos
+                .iter()
+                .enumerate()
+                .flat_map(|(index, repo)| repo.lanes.iter().flatten().map(move |c| (index, c)))
+                .find(|(_, card)| card.task.path == path)
+                .map(|(index, card)| Editor::open(index, card))
+            {
+                Some(Ok(editor)) => self.editing = Some(editor),
+                Some(Err(err)) => self.status = Some(format!("{err}")),
+                None => {}
+            }
+        }
+
         if let Some(drop) = pending {
             self.apply(drop);
         } else if reload {
             self.reload();
+        }
+    }
+}
+
+/// The edit overlay: a modal over the board, dismissed with Escape or by
+/// clicking outside, which egui reports through `should_close`.
+#[cfg(feature = "gui")]
+impl BoardApp {
+    fn editor_ui(&mut self, ctx: &egui::Context) {
+        let Some(editor) = &mut self.editing else {
+            return;
+        };
+
+        let mut save = false;
+        let mut cancel = false;
+        let id = editor.id.clone();
+
+        let modal = egui::Modal::new(egui::Id::new("ticket-editor")).show(ctx, |ui| {
+            ui.set_width(560.0);
+            ui.heading(format!("Ticket {id}"));
+            ui.separator();
+
+            egui::Grid::new("fields")
+                .num_columns(2)
+                .spacing([8.0, 6.0])
+                .show(ui, |ui| {
+                    ui.label("Title");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut editor.title).desired_width(f32::INFINITY),
+                    );
+                    ui.end_row();
+                    ui.label("Assignee");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut editor.assignee)
+                            .desired_width(f32::INFINITY)
+                            .hint_text("unassigned"),
+                    );
+                    ui.end_row();
+                });
+
+            ui.add_space(6.0);
+            ui.label("Body");
+            egui::ScrollArea::vertical()
+                .max_height(320.0)
+                .show(ui, |ui| {
+                    ui.add(
+                        egui::TextEdit::multiline(&mut editor.body)
+                            .code_editor()
+                            .desired_width(f32::INFINITY)
+                            .desired_rows(16),
+                    );
+                });
+
+            ui.separator();
+            ui.horizontal(|ui| {
+                save = ui.button("Save").clicked();
+                cancel = ui.button("Cancel").clicked();
+                ui.weak("the filename keeps its original slug");
+            });
+        });
+
+        if save {
+            self.save();
+        } else if cancel || modal.should_close() {
+            self.editing = None;
         }
     }
 }
@@ -247,6 +386,7 @@ fn column_ui(
     repo: &RepoBoard,
     repo_index: usize,
     column: Column,
+    opened: &mut Option<PathBuf>,
 ) -> Option<Drop> {
     let mut result = None;
     let cards = &repo.lanes[column as usize];
@@ -273,7 +413,9 @@ fn column_ui(
                 if let Some(drop) = slot(ui, repo_index, column, index) {
                     result = Some(drop);
                 }
-                card_ui(ui, card, repo_index);
+                if card_ui(ui, card, repo_index) {
+                    *opened = Some(card.task.path.clone());
+                }
             }
             if let Some(drop) = slot(ui, repo_index, column, cards.len()) {
                 result = Some(drop);
@@ -327,13 +469,13 @@ fn slot(ui: &mut egui::Ui, repo_index: usize, column: Column, index: usize) -> O
 /// A ticket: the width of its column, as tall as its title needs, so a column
 /// reads as a stack.
 #[cfg(feature = "gui")]
-fn card_ui(ui: &mut egui::Ui, card: &Card, repo_index: usize) {
+fn card_ui(ui: &mut egui::Ui, card: &Card, repo_index: usize) -> bool {
     let id = egui::Id::new(("card", &card.task.path));
     let payload = Dragged {
         path: card.task.path.clone(),
         repo: repo_index,
     };
-    ui.dnd_drag_source(id, payload, |ui| {
+    let dragged = ui.dnd_drag_source(id, payload, |ui| {
         egui::Frame::default()
             .inner_margin(8.0)
             .fill(ui.visuals().panel_fill)
@@ -357,6 +499,11 @@ fn card_ui(ui: &mut egui::Ui, card: &Card, repo_index: usize) {
                 });
             });
     });
+
+    // dnd_drag_source senses drag only, so the double-click needs its own
+    // interaction over the same rectangle.
+    ui.interact(dragged.response.rect, id.with("open"), egui::Sense::click())
+        .double_clicked()
 }
 
 #[cfg(feature = "gui")]
