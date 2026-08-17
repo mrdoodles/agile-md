@@ -345,6 +345,22 @@ fn sort_cards(cards: &mut [Card]) {
     });
 }
 
+/// Put a typed body into a rendered ticket, keeping its frontmatter.
+///
+/// An empty body leaves the template's own, so clearing the box gets you the
+/// default ticket rather than an empty file that `write` would refuse.
+fn splice_body(rendered: &str, body: &str) -> String {
+    if body.trim().is_empty() {
+        return rendered.to_string();
+    }
+    match crate::task::split_body(rendered) {
+        Some((head, _)) => format!("{head}{body}"),
+        // No frontmatter to keep: the template is not one we understand, so
+        // don't pretend — write what it rendered.
+        None => rendered.to_string(),
+    }
+}
+
 fn read_lanes(board: &Board) -> Result<Vec<Vec<Card>>> {
     let mut lanes = Vec::new();
     for column in Column::ALL {
@@ -849,6 +865,7 @@ impl BoardApp {
 
         let outcome = (|| -> Result<()> {
             let board = &self.repos[repo].board;
+            let _ = &body;
             // The same two steps `amd new` takes: render a draft from the
             // templates, then write it. Going through create:: means a ticket
             // made here is identical to one made from the CLI.
@@ -867,10 +884,12 @@ impl BoardApp {
                     extra: Default::default(),
                 },
             )?;
-            // The body the overlay collected replaces the template's, the
-            // same way `amd new` hands the editor's output to write().
-            let body = (!body.trim().is_empty()).then_some(body.clone());
-            let created = draft.write(board, body)?;
+            // write() takes the *whole file*, which is what `amd new` hands
+            // it after the editor has been over the rendered ticket. Passing
+            // the notes alone wrote a file with no frontmatter, and every
+            // call after it then failed on a ticket that was not one.
+            let text = splice_body(&draft.body, &body);
+            let created = draft.write(board, Some(text))?;
             if !points.is_empty() {
                 created.task.set_points(&points)?;
             }
@@ -1220,4 +1239,43 @@ pub fn run() -> Result<()> {
         Box::new(|_cc| Ok(Box::new(app) as Box<dyn eframe::App>)),
     )
     .map_err(|err| anyhow!("{err}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const RENDERED: &str = "---\nid: \"001\"\ntitle: \"T\"\npoints: \"\"\n---\n\n## Notes\n\n\n";
+
+    #[test]
+    fn a_typed_body_keeps_the_rendered_frontmatter() {
+        // The bug this guards: passing the notes alone to Draft::write wrote a
+        // file with no frontmatter, so every call after it — set_points,
+        // set_epic — failed and the new-ticket overlay could never close.
+        let spliced = splice_body(RENDERED, "\n## Notes\n\nwhat I typed\n");
+        assert!(
+            spliced.starts_with("---\nid: \"001\"\n"),
+            "frontmatter must survive: {spliced}"
+        );
+        assert!(spliced.ends_with("what I typed\n"), "{spliced}");
+        assert_eq!(
+            spliced.matches("---").count(),
+            2,
+            "and must not be duplicated: {spliced}"
+        );
+    }
+
+    #[test]
+    fn an_empty_body_falls_back_to_the_template() {
+        // write() refuses an empty ticket, so clearing the box must give the
+        // default rather than nothing.
+        assert_eq!(splice_body(RENDERED, "   \n"), RENDERED);
+        assert_eq!(splice_body(RENDERED, ""), RENDERED);
+    }
+
+    #[test]
+    fn a_template_without_frontmatter_is_left_as_rendered() {
+        let odd = "no frontmatter at all\n";
+        assert_eq!(splice_body(odd, "typed"), odd);
+    }
 }

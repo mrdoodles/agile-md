@@ -325,7 +325,7 @@ fn set_meta(text: &str, key: &str, value: &str) -> Result<String> {
 /// Split a task file into its frontmatter (fences included, trailing newline
 /// kept) and the body below it. `None` when there is no closing fence, so a
 /// half-written file is left alone rather than rewritten into nonsense.
-fn split_body(text: &str) -> Option<(&str, &str)> {
+pub fn split_body(text: &str) -> Option<(&str, &str)> {
     let rest = text.strip_prefix("---\n")?;
     let end = rest.find("\n---\n")?;
     // 1 for the newline the match starts with, 4 for "---\n".
