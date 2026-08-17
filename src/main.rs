@@ -137,6 +137,24 @@ enum Cmd {
         #[arg(value_name = "WHO")]
         who: Option<String>,
     },
+    /// Set a field on a ticket: points, epic, order or title
+    Set {
+        #[arg(value_name = "REF")]
+        task: String,
+        #[arg(
+            value_name = "FIELD",
+            value_parser = PossibleValuesParser::new(["points", "epic", "order", "title"]),
+        )]
+        field: String,
+        /// The new value; empty clears the field
+        #[arg(value_name = "VALUE", default_value = "")]
+        value: String,
+    },
+    /// Epics and sprints: the folders the backlog is divided into
+    Group {
+        #[command(subcommand)]
+        command: Option<GroupCmd>,
+    },
     /// Register repositories so their boards can be seen together
     Repos {
         #[command(subcommand)]
@@ -216,6 +234,35 @@ struct NewArgs {
     /// Create the ticket from the template without opening an editor
     #[arg(long, conflicts_with = "edit")]
     no_edit: bool,
+}
+
+#[derive(Subcommand, Debug)]
+enum GroupCmd {
+    /// List the epics and sprints in this backlog
+    List,
+    /// Create an epic
+    Epic {
+        #[arg(value_name = "NAME")]
+        name: String,
+        #[arg(long, value_name = "TEXT", default_value = "")]
+        description: String,
+    },
+    /// Create a sprint
+    Sprint {
+        #[arg(value_name = "NAME")]
+        name: String,
+        #[arg(long, value_name = "TEXT", default_value = "")]
+        description: String,
+        /// How long it runs
+        #[arg(long, value_name = "DAYS", default_value_t = agile_md::group::DEFAULT_DAYS)]
+        days: u32,
+    },
+    /// Start a sprint. There is no way back: a started sprint takes nothing
+    /// more and gives nothing back
+    Start {
+        #[arg(value_name = "NAME")]
+        name: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -351,6 +398,36 @@ fn run() -> Result<()> {
             let task = resolve(&board, task, "edit", &Column::ALL)?;
             open_editor(&task.path)
         }
+        Cmd::Set { task, field, value } => {
+            let task = resolve(&board, Some(task), "set", &Column::ALL)?;
+            match field.as_str() {
+                "points" => {
+                    task.set_points(&value)?;
+                    println!("{} sized {}", task.id_display(), display(&value));
+                }
+                // Filing goes through the board, not the ticket: it moves the
+                // file, and the sprint rules live there.
+                "epic" => {
+                    let epic = (!value.is_empty()).then_some(value.as_str());
+                    board.set_epic(&task, epic)?;
+                    println!("{} filed under {}", task.id_display(), display(&value));
+                }
+                "order" => {
+                    let rank: f64 = value
+                        .parse()
+                        .with_context(|| format!("{value} is not a number"))?;
+                    task.set_order(rank)?;
+                    println!("{} ranked {rank}", task.id_display());
+                }
+                "title" => {
+                    task.set_title(&value)?;
+                    println!("{} retitled", task.id_display());
+                }
+                other => bail!("unknown field {other}"),
+            }
+            Ok(())
+        }
+        Cmd::Group { command } => cmd_group(&board, command.unwrap_or(GroupCmd::List)),
         Cmd::Assign { task, who } => {
             let task = resolve(&board, Some(task), "assign", &Column::ALL)?;
             let who = resolve_assignee(who.as_deref());
@@ -454,6 +531,85 @@ fn cmd_gui() -> Result<()> {
 #[cfg(not(feature = "gui"))]
 fn cmd_gui() -> Result<()> {
     bail!("this build has no desktop board — rebuild with --features gui")
+}
+
+/// An empty value reads better as a word than as nothing at all.
+fn display(value: &str) -> String {
+    match value.is_empty() {
+        true => "(cleared)".to_string(),
+        false => value.to_string(),
+    }
+}
+
+fn cmd_group(board: &Board, command: GroupCmd) -> Result<()> {
+    use agile_md::group::{Group, Kind, State};
+    match command {
+        GroupCmd::List => {
+            let groups = board.groups()?;
+            if groups.is_empty() {
+                println!("(no epics or sprints — add one with: amd group epic <name>)");
+                return Ok(());
+            }
+            for group in groups {
+                let tickets = board
+                    .tasks_in(Column::Backlog)?
+                    .into_iter()
+                    .filter(|task| task.epic.as_deref() == Some(group.name.as_str()))
+                    .collect::<Vec<_>>();
+                let points: i64 = tickets
+                    .iter()
+                    .filter_map(|task| task.points())
+                    .filter_map(|p| p.trim().parse::<i64>().ok())
+                    .sum();
+                let detail = match group.is_sprint() {
+                    true => format!("sprint  {}d  {}", group.days, group.state.as_str()),
+                    false => "epic".to_string(),
+                };
+                println!(
+                    "{:<24} {detail:<22} {} ticket(s), {points} point(s)",
+                    group.name,
+                    tickets.len()
+                );
+            }
+            Ok(())
+        }
+        GroupCmd::Epic { name, description } => {
+            let group = Group {
+                dir: board.dir(Column::Backlog).join(&name),
+                name: name.clone(),
+                kind: Kind::Epic,
+                description,
+                days: agile_md::group::DEFAULT_DAYS,
+                state: State::Pending,
+            };
+            board.create_group(&group)?;
+            println!("created epic {name}");
+            Ok(())
+        }
+        GroupCmd::Sprint {
+            name,
+            description,
+            days,
+        } => {
+            let group = Group {
+                dir: board.dir(Column::Backlog).join(&name),
+                name: name.clone(),
+                kind: Kind::Sprint,
+                description,
+                days,
+                state: State::Pending,
+            };
+            board.create_group(&group)?;
+            println!("created sprint {name} ({days} days)");
+            Ok(())
+        }
+        GroupCmd::Start { name } => {
+            let mut group = board.group(&name)?;
+            group.start()?;
+            println!("{name} started — its tickets are now fixed");
+            Ok(())
+        }
+    }
 }
 
 /// The registry is a list of repositories, not a copy of their tickets: the

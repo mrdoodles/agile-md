@@ -206,6 +206,29 @@ it.
 The board is a default feature; `--no-default-features` builds the command line
 alone, which is what CI and scripts want.
 
+## Driving it from the command line
+
+Everything the board does is a command, so a script — or an agent — can work a
+board without opening a window. `--no-input` makes it never prompt.
+
+```bash
+amd new "Checkout revamp" --no-input   # lands in backlog/
+amd set 001 points 5                   # points, epic, order, title
+amd group epic checkout --description "the checkout flow"
+amd group sprint sprint-1 --days 10
+amd set 001 epic sprint-1              # refused unless the ticket is sized
+amd group start sprint-1               # one way: no route back to pending
+amd group                              # tickets and points per epic and sprint
+amd start 001 --no-branch && amd done 001
+```
+
+The rules live in the board, not the window, so the command line gets them
+too: a sprint refuses an unsized ticket, and a started one takes nothing more
+and gives nothing back.
+
+`--no-default-features` builds this without the desktop board — the whole API,
+no windowing stack, which is what CI and scripts want.
+
 ## Shell completion
 
 ```bash
