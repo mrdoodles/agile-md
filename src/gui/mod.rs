@@ -6,6 +6,7 @@
 //! shows every registered repository, so work across boards is visible
 //! together without a web front end.
 
+pub mod richtext;
 pub mod settings;
 
 use std::path::PathBuf;
@@ -79,6 +80,10 @@ struct Draft {
     title: String,
     epic: Option<String>,
     points: String,
+    /// Notes written while creating, appended to the template's body.
+    body: String,
+    markdown: bool,
+    line: richtext::Editing,
 }
 
 /// An epic or sprint being created or edited. The same overlay does both:
@@ -105,6 +110,11 @@ struct Editor {
     assignee: String,
     points: String,
     body: String,
+    /// Rich text unless asked otherwise — the markdown is there for when you
+    /// want it, not as the price of writing a sentence.
+    markdown: bool,
+    /// Which line the rich-text editor has open, kept between frames.
+    line: richtext::Editing,
 }
 
 impl Editor {
@@ -117,6 +127,8 @@ impl Editor {
             assignee: card.task.assignee().unwrap_or_default(),
             points: card.task.points().unwrap_or_default(),
             body: card.task.body()?,
+            markdown: false,
+            line: None,
         })
     }
 }
@@ -415,6 +427,9 @@ impl eframe::App for BoardApp {
                         title: String::new(),
                         epic: None,
                         points: String::new(),
+                        body: "\n## Notes\n\n\n## Acceptance criteria\n\n- [ ] \n".to_string(),
+                        markdown: false,
+                        line: None,
                     });
                 }
                 reload = ui.button("Reload").clicked();
@@ -779,6 +794,32 @@ impl BoardApp {
                     ui.end_row();
                 });
 
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ui.label("Body");
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let label = if draft.markdown { "RT" } else { "MD" };
+                    if ui.button(label).clicked() {
+                        draft.markdown = !draft.markdown;
+                        draft.line = None;
+                    }
+                });
+            });
+            egui::ScrollArea::vertical()
+                .max_height(220.0)
+                .show(ui, |ui| {
+                    if draft.markdown {
+                        ui.add(
+                            egui::TextEdit::multiline(&mut draft.body)
+                                .code_editor()
+                                .desired_width(f32::INFINITY)
+                                .desired_rows(10),
+                        );
+                    } else {
+                        richtext::ui(ui, &mut draft.body, &mut draft.line);
+                    }
+                });
+
             ui.separator();
             ui.horizontal(|ui| {
                 create = ui
@@ -804,6 +845,7 @@ impl BoardApp {
         let title = draft.title.trim().to_string();
         let epic = draft.epic.clone();
         let points = draft.points.trim().to_string();
+        let body = draft.body.clone();
 
         let outcome = (|| -> Result<()> {
             let board = &self.repos[repo].board;
@@ -825,7 +867,10 @@ impl BoardApp {
                     extra: Default::default(),
                 },
             )?;
-            let created = draft.write(board, None)?;
+            // The body the overlay collected replaces the template's, the
+            // same way `amd new` hands the editor's output to write().
+            let body = (!body.trim().is_empty()).then_some(body.clone());
+            let created = draft.write(board, body)?;
             if !points.is_empty() {
                 created.task.set_points(&points)?;
             }
@@ -888,16 +933,38 @@ impl BoardApp {
                 });
 
             ui.add_space(6.0);
-            ui.label("Body");
+            ui.horizontal(|ui| {
+                ui.label("Body");
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    // Top right, and it says what you get, not what you are in.
+                    let label = if editor.markdown { "RT" } else { "MD" };
+                    if ui
+                        .button(label)
+                        .on_hover_text(if editor.markdown {
+                            "switch to rich text"
+                        } else {
+                            "switch to markdown"
+                        })
+                        .clicked()
+                    {
+                        editor.markdown = !editor.markdown;
+                        editor.line = None;
+                    }
+                });
+            });
             egui::ScrollArea::vertical()
                 .max_height(320.0)
                 .show(ui, |ui| {
-                    ui.add(
-                        egui::TextEdit::multiline(&mut editor.body)
-                            .code_editor()
-                            .desired_width(f32::INFINITY)
-                            .desired_rows(16),
-                    );
+                    if editor.markdown {
+                        ui.add(
+                            egui::TextEdit::multiline(&mut editor.body)
+                                .code_editor()
+                                .desired_width(f32::INFINITY)
+                                .desired_rows(16),
+                        );
+                    } else {
+                        richtext::ui(ui, &mut editor.body, &mut editor.line);
+                    }
                 });
 
             ui.separator();
