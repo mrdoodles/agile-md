@@ -75,7 +75,9 @@ impl BoardApp {
                 continue;
             }
             repos.push(RepoBoard {
-                name: board.name(),
+                // The registry's name, not Board::name(): a board's root is
+                // <repo>/tasks, so the latter labels every repository "tasks".
+                name: entry.name.clone(),
                 lanes: read_lanes(&board)?,
                 board,
                 visible: true,
