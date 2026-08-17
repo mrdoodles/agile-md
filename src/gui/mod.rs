@@ -6,6 +6,8 @@
 //! shows every registered repository, so work across boards is visible
 //! together without a web front end.
 
+pub mod settings;
+
 use std::path::PathBuf;
 
 use anyhow::{Result, anyhow};
@@ -14,6 +16,7 @@ use crate::board::{Board, Column};
 use crate::group::{DEFAULT_DAYS, Group, Kind, State};
 use crate::registry::Registry;
 use crate::task::Task;
+use settings::{FontSize, GuiSettings, Theme};
 
 /// Wide enough for a title of a few words without wrapping to three lines,
 /// narrow enough that three columns and a scrollbar fit a laptop screen.
@@ -125,6 +128,9 @@ pub struct BoardApp {
     drafting: Option<Draft>,
     group_draft: Option<GroupDraft>,
     view: View,
+    settings: GuiSettings,
+    /// Open while the settings overlay is up.
+    showing_settings: bool,
     /// Which repository the backlog view is showing. The board view stacks
     /// every repository; the backlog is long enough that one at a time reads
     /// better.
@@ -165,6 +171,8 @@ impl BoardApp {
             drafting: None,
             group_draft: None,
             view: View::Board,
+            settings: GuiSettings::load(),
+            showing_settings: false,
             backlog_repo: 0,
         })
     }
@@ -338,6 +346,20 @@ fn read_lanes(board: &Board) -> Result<Vec<Vec<Card>>> {
 #[cfg(feature = "gui")]
 impl eframe::App for BoardApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        // Applied every frame rather than only on change: it is two cheap
+        // setters, and it means the window is right on the first paint after
+        // loading from the config file.
+        let ctx = ui.ctx().clone();
+        ctx.set_theme(match self.settings.theme {
+            Theme::System => egui::ThemePreference::System,
+            Theme::Light => egui::ThemePreference::Light,
+            Theme::Dark => egui::ThemePreference::Dark,
+        });
+        // Zoom rather than the text styles alone: it scales spacing and the
+        // card widths with the text, so a large font does not overflow a
+        // column sized for a standard one.
+        ctx.set_zoom_factor(self.settings.font.scale());
+
         let mut pending: Option<Drop> = None;
         let mut reload = false;
         let mut opened: Option<PathBuf> = None;
@@ -396,9 +418,9 @@ impl eframe::App for BoardApp {
                     });
                 }
                 reload = ui.button("Reload").clicked();
-                // Follows the system by default, and remembers an explicit
-                // choice — egui persists the preference for us.
-                egui::global_theme_preference_switch(ui);
+                if ui.button("Settings").clicked() {
+                    self.showing_settings = true;
+                }
             });
             if let Some(status) = &self.status {
                 ui.colored_label(egui::Color32::from_rgb(220, 80, 80), status);
@@ -456,6 +478,7 @@ impl eframe::App for BoardApp {
         self.editor_ui(ui.ctx());
         self.draft_ui(ui.ctx());
         self.group_ui(ui.ctx());
+        self.settings_ui(&ctx);
 
         if let Some(name) = group_edit {
             self.open_group(&name);
@@ -487,6 +510,59 @@ impl eframe::App for BoardApp {
             self.apply(drop);
         } else if reload {
             self.reload();
+        }
+    }
+}
+
+/// The settings overlay: theme and text size, both remembered.
+#[cfg(feature = "gui")]
+impl BoardApp {
+    fn settings_ui(&mut self, ctx: &egui::Context) {
+        if !self.showing_settings {
+            return;
+        }
+        let before = self.settings;
+        let mut close = false;
+
+        let modal = egui::Modal::new(egui::Id::new("settings")).show(ctx, |ui| {
+            ui.set_width(360.0);
+            ui.heading("Settings");
+            ui.separator();
+
+            ui.label("Text size");
+            ui.horizontal(|ui| {
+                for size in [FontSize::Standard, FontSize::Medium, FontSize::Large] {
+                    ui.selectable_value(&mut self.settings.font, size, size.label());
+                }
+            });
+            ui.weak(format!("{}x the standard size", self.settings.font.scale()));
+
+            ui.add_space(8.0);
+            ui.label("Colour scheme");
+            ui.horizontal(|ui| {
+                for (theme, label) in [
+                    (Theme::System, "System"),
+                    (Theme::Light, "Light"),
+                    (Theme::Dark, "Dark"),
+                ] {
+                    ui.selectable_value(&mut self.settings.theme, theme, label);
+                }
+            });
+            ui.weak("remembered for next time");
+
+            ui.separator();
+            close = ui.button("Close").clicked();
+        });
+
+        // Saved on change rather than on close, so quitting the window without
+        // pressing anything still keeps the choice.
+        if self.settings != before
+            && let Err(err) = self.settings.save()
+        {
+            self.status = Some(format!("{err}"));
+        }
+        if close || modal.should_close() {
+            self.showing_settings = false;
         }
     }
 }

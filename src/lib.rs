@@ -15,6 +15,7 @@ pub mod git;
 pub mod group;
 pub mod registry;
 pub mod render;
+pub mod settings;
 pub mod task;
 pub mod templates;
 

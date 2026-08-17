@@ -1,14 +1,15 @@
 //! TUI settings: the theme, and where it's remembered.
 //!
-//! Kept in a one-line file rather than a config format, because there is one
-//! setting. `theme = <slug>` is greppable, hand-editable, and needs no parser
-//! dependency; anything unrecognised falls back to the default rather than
-//! failing to start.
+//! The theme lives in the shared config file under `theme`. Reading and
+//! writing go through `crate::settings::Config`, which keeps the keys it does
+//! not understand — otherwise saving a theme here would delete the GUI's
+//! settings from the same file.
 
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use ratatui_themes::ThemeName;
+
+use crate::settings::Config;
 
 /// The user's choices, as loaded from disk.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -20,7 +21,7 @@ impl Settings {
     /// Load, treating anything missing or unreadable as "defaults" — a broken
     /// config file should never stop you seeing the board.
     pub fn load() -> Settings {
-        match path() {
+        match crate::settings::path() {
             Some(path) => Settings::load_from(&path),
             None => Settings::default(),
         }
@@ -28,48 +29,34 @@ impl Settings {
 
     /// Save, reporting failure so the dialog can say so rather than pretending.
     pub fn save(&self) -> anyhow::Result<()> {
-        let path = path().ok_or_else(|| anyhow::anyhow!("no config directory"))?;
+        let path = crate::settings::path().ok_or_else(|| anyhow::anyhow!("no config directory"))?;
         self.save_to(&path)
     }
 
     /// The half that takes a path, so the tests need no environment fiddling.
     fn load_from(path: &Path) -> Settings {
-        let Ok(text) = fs::read_to_string(path) else {
-            return Settings::default();
-        };
+        let config = Config::load_from(path);
         let mut settings = Settings::default();
-        for line in text.lines() {
-            let Some((key, value)) = line.split_once('=') else {
-                continue;
-            };
-            if key.trim() == "theme"
-                && let Ok(theme) = value.trim().parse::<ThemeName>()
-            {
-                settings.theme = theme;
-            }
+        if let Some(theme) = config
+            .get("theme")
+            .and_then(|v| v.parse::<ThemeName>().ok())
+        {
+            settings.theme = theme;
         }
         settings
     }
 
     fn save_to(&self, path: &Path) -> anyhow::Result<()> {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        fs::write(path, format!("theme = {}\n", self.theme.slug()))?;
-        Ok(())
+        let mut config = Config::load_from(path);
+        config.set("theme", self.theme.slug());
+        config.save_to(path)
     }
-}
-
-/// `$XDG_CONFIG_HOME/agile-md/config`, else `~/.config/agile-md/config`.
-fn path() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))?;
-    Some(base.join("agile-md").join("config"))
 }
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::*;
 
     #[test]
