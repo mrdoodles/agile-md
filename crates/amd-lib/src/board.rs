@@ -300,21 +300,16 @@ impl Board {
     /// `None`. The folder is the move; the frontmatter is updated to match, so
     /// a ticket read on its own still says which epic it belongs to.
     pub fn set_epic(&self, task: &Task, epic: Option<&str>) -> Result<PathBuf> {
-        // Leaving a started sprint is as much a change as joining one: both
-        // rewrite what the sprint committed to.
-        if let Some(current) = task.epic.as_deref()
-            && let Ok(group) = self.group(current)
-            && !group.accepts_changes()
-        {
-            bail!("{} has started; its tickets are fixed", group.name);
-        }
+        // A started sprint takes tickets in and lets them out. Teams do this —
+        // more often when they are new — and it is poor practice that skews the
+        // charts, but a tool that refuses leaves people editing frontmatter by
+        // hand, which skews the charts *and* loses the record. Every move is a
+        // `git mv`, so the scope change is dated in the history and a burnup
+        // can show it (docs/adr/0009-sprint-scope-and-archiving.md).
         if let Some(name) = epic {
             let group = self.group(name)?;
-            if !group.accepts_changes() {
-                bail!("{name} has started; nothing more can be added");
-            }
             // An unsized ticket in a sprint makes the sprint's total a lie,
-            // which is the one number a sprint is for.
+            // which is the one number a sprint is for. This rule stays.
             if group.is_sprint() && task.points().is_none() {
                 bail!("{} needs points before it can go in {name}", task.stem);
             }
@@ -345,6 +340,31 @@ impl Board {
     }
 
     /// Every task on the board, column order first.
+    /// Every ticket belonging to a group, in whatever column it has reached.
+    ///
+    /// A sprint's scope does not shrink because somebody started work. Counting
+    /// only `backlog/` made a sprint's points fall as tickets moved to
+    /// `doing/`, which is the opposite of what that number is for.
+    ///
+    /// Which field answers "what group is this in" depends on where the ticket
+    /// is, and the two are not interchangeable. Inside `backlog/` the **folder**
+    /// decides — a ticket dragged into an epic directory by hand is in that
+    /// epic, frontmatter or no. Outside it there are no group directories, so
+    /// the `epic` key written by `set_epic` is the only carrier.
+    ///
+    /// The archive is deliberately not searched: an archived ticket has left
+    /// the board.
+    pub fn tasks_in_group(&self, name: &str) -> Result<Vec<Task>> {
+        Ok(self
+            .tasks()?
+            .into_iter()
+            .filter(|task| match task.column {
+                Column::Backlog => task.epic.as_deref() == Some(name),
+                _ => task.epic_meta().as_deref() == Some(name),
+            })
+            .collect())
+    }
+
     pub fn tasks(&self) -> Result<Vec<Task>> {
         let mut all = Vec::new();
         for column in Column::ALL {
@@ -454,6 +474,22 @@ impl Board {
     /// `git mv` would refuse the ignored destination, and forcing it would put
     /// the ticket back into the history the .gitignore is there to keep it out of.
     pub fn archive(&self, task: &Task) -> Result<PathBuf> {
+        // Moving a ticket out of a started sprint leaves a `git mv` in the
+        // history: the scope change is dated and the points are still readable
+        // on disk. Archiving from inside one leaves neither — the file is
+        // gitignored and untracked, so the board no longer shows that those
+        // points were ever committed to. Take it out of the sprint first; then
+        // archive it. Two steps, and the record survives the first.
+        if let Some(name) = task.epic.as_deref()
+            && let Ok(group) = self.group(name)
+            && group.is_sprint()
+            && !group.accepts_changes()
+        {
+            bail!(
+                "{} is in {name}, which has started — move it out of the sprint before archiving it",
+                task.stem
+            );
+        }
         let dir = self.archive_dir();
         fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
         let dest = dir.join(task.file_name());
@@ -614,7 +650,11 @@ mod tests {
     }
 
     #[test]
-    fn a_started_sprint_takes_nothing_more_and_gives_nothing_back() {
+    fn a_started_sprint_takes_tickets_in_and_out_but_refuses_an_archive() {
+        // ADR-0009. The old rule — a started sprint is immutable — was one
+        // `amd rm` wide, and refusing only pushed the change out of the tool's
+        // sight. What it defends now is the *record*: a move out is a git mv,
+        // an archive is gitignored and is not.
         let dir = tempfile::tempdir().unwrap();
         let board = board_at(dir.path());
         let mut group = sprint(&board, "sprint-1");
@@ -626,15 +666,57 @@ mod tests {
         board.set_epic(&inside, Some("sprint-1")).unwrap();
         group.start().unwrap();
 
+        // Tickets go in after the start...
         let outside = board.find("002").unwrap();
         outside.set_points("2").unwrap();
-        let err = board.set_epic(&outside, Some("sprint-1")).unwrap_err();
-        assert!(err.to_string().contains("has started"), "unexpected: {err}");
+        board
+            .set_epic(&outside, Some("sprint-1"))
+            .expect("a started sprint takes a sized ticket");
 
-        // And what is in it cannot be taken out either.
+        // ...and come back out again.
         let inside = board.find("001").unwrap();
-        let err = board.set_epic(&inside, None).unwrap_err();
-        assert!(err.to_string().contains("has started"), "unexpected: {err}");
+        board
+            .set_epic(&inside, None)
+            .expect("a started sprint lets a ticket out");
+
+        // But not straight into the archive.
+        let still_in = board.find("002").unwrap();
+        let err = board.archive(&still_in).unwrap_err();
+        assert!(
+            err.to_string().contains("before archiving"),
+            "unexpected: {err}"
+        );
+
+        // Out of the sprint first, and then it may go.
+        let out = board.find("002").unwrap();
+        board.set_epic(&out, None).unwrap();
+        let out = board.find("002").unwrap();
+        board
+            .archive(&out)
+            .expect("archivable once out of the sprint");
+    }
+
+    #[test]
+    fn a_sprint_keeps_its_tickets_when_they_leave_the_backlog() {
+        // The bug: scope was counted from backlog/ alone, so a sprint's points
+        // fell as work started on them.
+        let dir = tempfile::tempdir().unwrap();
+        let board = board_at(dir.path());
+        sprint(&board, "sprint-1");
+        backlog_ticket(&board, "001-in.md");
+
+        let task = board.find("001").unwrap();
+        task.set_points("5").unwrap();
+        board.set_epic(&task, Some("sprint-1")).unwrap();
+        assert_eq!(board.tasks_in_group("sprint-1").unwrap().len(), 1);
+
+        let task = board.find("001").unwrap();
+        board.move_task(&task, Column::Doing).unwrap();
+        assert_eq!(
+            board.tasks_in_group("sprint-1").unwrap().len(),
+            1,
+            "a ticket in doing/ still belongs to its sprint"
+        );
     }
 
     #[test]

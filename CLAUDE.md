@@ -319,6 +319,21 @@ changes):
   layout still work; v3 task files simply have no labels, so `amd start` on one
   leaves the branch alone.
 
+## Epics and sprints (`crates/amd-lib/src/group.rs`, ADR-0009)
+
+- A group is a directory under `backlog/` with a `_group.md` describing it.
+  **Inside `backlog/` the folder decides** which group a ticket is in; outside
+  it there are no group directories, so the `epic` frontmatter key is the only
+  carrier. `Board::tasks_in_group` treats the two cases separately — do not
+  collapse them.
+- A sprint's scope is a query over **every column**, not a directory listing. A
+  ticket in `doing/` still belongs to the sprint it was committed to. Counting
+  `backlog/` alone made a sprint's points fall as work progressed.
+- **A started sprint takes tickets in and lets them out.** It refuses two
+  things: an unsized ticket (it would make the total a lie) and an *archive*
+  straight out of the sprint (a move out is a dated `git mv`; an archive is
+  gitignored and is not). `State::Started` marks a moment, not a lock.
+
 ## The desktop board (`crates/amd-lib/src/gui/`)
 
 - egui/eframe, the same stack as rustmark, so the two look alike and a ticket

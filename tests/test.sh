@@ -314,10 +314,25 @@ assert "group list totals tickets and points" \
   bash -c "cd '${work}' && '${AMD}' group list | grep -qE 'sprint-1 +sprint +10d +pending +1 ticket\(s\), 5 point\(s\)'"
 assert "starting a sprint says so" \
   bash -c "cd '${work}' && '${AMD}' group start sprint-1 | grep -q 'started'"
-assert "a started sprint gives nothing back" \
-  bash -c "cd '${work}' && '${AMD}' set 001 epic checkout 2>&1 | grep -q 'has started; its tickets are fixed'"
-assert "a started sprint takes nothing more" \
-  bash -c "cd '${work}' && '${AMD}' set 002 points 3 >/dev/null && '${AMD}' set 002 epic sprint-1 2>&1 | grep -q 'has started; nothing more can be added'"
+# A started sprint takes tickets in and lets them out (ADR-0009). It happens in
+# real teams, it skews the charts, and refusing only pushes people into editing
+# frontmatter by hand — which skews them and loses the record.
+assert "a started sprint lets a ticket out" \
+  bash -c "cd '${work}' && '${AMD}' set 001 epic checkout | grep -q 'filed under checkout'"
+assert "a started sprint takes a sized ticket in" \
+  bash -c "cd '${work}' && '${AMD}' set 002 points 3 >/dev/null && '${AMD}' set 002 epic sprint-1 | grep -q 'filed under sprint-1'"
+assert "a started sprint still refuses an unsized ticket" \
+  bash -c "cd '${work}' && '${AMD}' new 'Unsized' >/dev/null && '${AMD}' set 003 epic sprint-1 2>&1 | grep -q 'needs points'"
+# Archiving is the one thing it refuses: a move out is a git mv and stays in
+# the history, an archive is gitignored and does not.
+assert "archiving straight out of a started sprint is refused" \
+  bash -c "cd '${work}' && '${AMD}' rm 002 2>&1 | grep -q 'move it out of the sprint before archiving'"
+assert "out of the sprint first, then archived" \
+  bash -c "cd '${work}' && '${AMD}' set 002 epic '' >/dev/null && '${AMD}' rm 002 | grep -q 'archived'"
+# The bug this guards: a sprint's points fell as work progressed, because the
+# count scanned backlog/ only and a ticket in doing/ has no epic directory.
+assert "a sprint keeps its points when work starts" \
+  bash -c "cd '${work}' && '${AMD}' set 001 epic sprint-1 >/dev/null && before=\$('${AMD}' group list | grep sprint-1) && '${AMD}' start 001 --no-branch >/dev/null && after=\$('${AMD}' group list | grep sprint-1) && [ \"\${before}\" = \"\${after}\" ]"
 assert "starting an unknown group fails" \
   bash -c "cd '${work}' && ! '${AMD}' group start nope"
 rm -rf "${work}"

@@ -205,7 +205,10 @@ BACKLOG (4)      TODO (3)         DOING (1)        DONE (7)
   scheme, both remembered in `~/.config/agile-md/config`.
 
 A **sprint** takes only sized tickets — an unsized one would make its point
-total a lie — and once started it takes nothing more and gives nothing back.
+total a lie. A started sprint still takes tickets in and lets them out, because
+teams do that and refusing only pushes it out of the tool's sight — but it will
+not let a ticket be **archived** out of it. Move it out of the sprint first, so
+the scope change is a `git mv` in the history rather than a disappearance.
 An **epic** takes anything: it is where work goes before anyone has estimated
 it.
 
@@ -230,8 +233,8 @@ amd start 001 --no-branch && amd done 001
 ```
 
 The rules live in the board, not the window, so the command line gets them
-too: a sprint refuses an unsized ticket, and a started one takes nothing more
-and gives nothing back.
+too: a sprint refuses an unsized ticket, and refuses to have one archived
+straight out of a started sprint.
 
 `cargo build -p amd-cli --no-default-features` builds this without the desktop
 board — the whole API, no windowing stack, which is what CI and scripts want.

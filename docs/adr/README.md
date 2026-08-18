@@ -17,6 +17,7 @@ can then move together, and a reviewer sees both in one diff.
 | [0006](0006-the-operation-vocabulary.md) | The operation vocabulary | Proposed |
 | [0007](0007-concurrency-and-locking.md) | Concurrency and locking | Proposed |
 | [0008](0008-room-for-a-server.md) | Room for a server | Accepted |
+| [0009](0009-sprint-scope-and-archiving.md) | Sprint scope, and the one thing a started sprint refuses | Accepted |
 
 ## Statuses
 

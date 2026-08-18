@@ -571,11 +571,7 @@ fn cmd_group(board: &Board, command: GroupCmd) -> Result<()> {
                 return Ok(());
             }
             for group in groups {
-                let tickets = board
-                    .tasks_in(Column::Backlog)?
-                    .into_iter()
-                    .filter(|task| task.epic.as_deref() == Some(group.name.as_str()))
-                    .collect::<Vec<_>>();
+                let tickets = board.tasks_in_group(&group.name)?;
                 let points: i64 = tickets
                     .iter()
                     .filter_map(|task| task.points())
