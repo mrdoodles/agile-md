@@ -2,7 +2,8 @@
 # knows about a terminal or a window does — see docs/adr/0004.
 #
 # The absence of clap, inquire and richrs from this manifest is the rule being
-# enforced. `gui` is still here pending phase 4 of docs/workspace-split.md.
+# enforced: this crate cannot draw a board even if someone tried. `gui` is
+# still here pending phase 4 of docs/workspace-split.md.
 [package]
 name = "agile-md"
 description = "A tiny filesystem Kanban: markdown tasks in todo/, doing/ and done/"
@@ -25,7 +26,6 @@ path = "src/lib.rs"
 anyhow.workspace = true
 deunicode.workspace = true
 minijinja.workspace = true
-richrs.workspace = true
 serde.workspace = true
 time.workspace = true
 

@@ -69,8 +69,14 @@ produces a CLI-only build — `amd-ui` requires `agile-md/gui`, and feature
 unification turns it back on. The headless build is now
 `cargo build -p amd-cli --no-default-features`. README and CLAUDE.md say so.
 
-**Phase 3 — `render.rs` to `amd-cli`.** This is where the library stops
-printing: `board.rs`'s `println!` becomes a returned value.
+**Phase 3 — `render.rs` to `amd-cli`. ✅ done.** The library is silent: no
+`println!`, no `IsTerminal`, no process-global state outside `gui/`, and
+`richrs` is gone from its manifest. `Board::move_task` returns the destination
+and `amd` prints `moved X -> done/` itself, which is now pinned by the suite.
+
+Moving `render.rs` out of the library also revealed `flatten()` as dead —
+written for the TUI's list widget, unreferenced since `cc713f7` removed it, and
+invisible while `pub` in a library made "unused" unprovable.
 
 **Phase 4 — `gui/` to `amd-ui`.** Splitting `gui/settings.rs` into schema
 (`amd-ui`) and storage (`amd-lib`), after which `amd-lib` lists no `egui` at

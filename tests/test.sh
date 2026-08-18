@@ -135,6 +135,9 @@ git checkout -q main 2>/dev/null || git checkout -q master
 "${AMD}" "done" 1 >/dev/null
 assert "done: doing -> done" test -f tasks/done/001-first-task.md
 assert "moved via git (rename tracked)" bash -c 'git status --porcelain | grep -q "^R"'
+# The move message comes from the CLI now, not from the library (ADR-0004).
+assert "a move reports where the ticket went" \
+  bash -c "'${AMD}' done 2 | grep -q 'moved 002-second-task.md -> done/'"
 "${AMD}" back 1 >/dev/null
 assert "back: done -> doing" test -f tasks/doing/001-first-task.md
 assert "moving into the same column fails" bash -c "! '${AMD}' start 1"

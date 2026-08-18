@@ -19,8 +19,8 @@ use std::sync::OnceLock;
 use anyhow::Result;
 use richrs::prelude::{Console, Style, Tree, TreeNode};
 
-use crate::board::{Board, Column};
-use crate::task::Task;
+use agile_md::board::{Board, Column};
+use agile_md::task::Task;
 
 static PLAIN: OnceLock<bool> = OnceLock::new();
 
@@ -65,20 +65,6 @@ pub fn column_forest(board: &Board, column: Column) -> Result<Vec<Node>> {
         })
         .collect();
     Ok(forest(with_parents))
-}
-
-/// Flatten a nested column into `(task, depth)` pairs, depth-first — the shape
-/// a list widget wants, from the same tree the terminal board draws.
-pub fn flatten(nodes: &[Node]) -> Vec<(Task, usize)> {
-    fn walk(nodes: &[Node], depth: usize, out: &mut Vec<(Task, usize)>) {
-        for node in nodes {
-            out.push((node.task.clone(), depth));
-            walk(&node.children, depth + 1, out);
-        }
-    }
-    let mut out = Vec::new();
-    walk(nodes, 0, &mut out);
-    out
 }
 
 /// Print one or more columns of the board.

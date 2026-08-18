@@ -32,4 +32,5 @@ clap.workspace = true
 clap_complete.workspace = true
 inquire.workspace = true
 libc.workspace = true
+richrs.workspace = true
 tempfile.workspace = true

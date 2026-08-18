@@ -6,6 +6,7 @@
 
 mod completions;
 mod form;
+mod render;
 mod value;
 
 use std::collections::BTreeMap;
@@ -24,7 +25,7 @@ use agile_md::board::{Board, Column};
 use agile_md::create::{Draft, NewTicket};
 use agile_md::registry::Registry;
 use agile_md::templates::{DEFAULT_TEMPLATE, TEMPLATE_SUFFIX, Templates};
-use agile_md::{branch, git, render, task, templates};
+use agile_md::{branch, git, task, templates};
 
 const AFTER_HELP: &str = "\
 A <REF> is a task id (e.g. 7 or 007) or a unique slug substring. Leave it out
@@ -382,12 +383,12 @@ fn run() -> Result<()> {
         }
         Cmd::Done { task } => {
             let task = resolve(&board, task, "done", &[Column::Doing])?;
-            board.move_task(&task, Column::Done)
+            move_and_report(&board, &task, Column::Done)
         }
         Cmd::Back { task } => {
             let task = resolve(&board, task, "back", &[Column::Doing, Column::Done])?;
             match task.column.left() {
-                Some(column) => board.move_task(&task, column),
+                Some(column) => move_and_report(&board, &task, column),
                 None => bail!("already in {}/", Column::Backlog),
             }
         }
@@ -481,7 +482,7 @@ fn cmd_start(
         },
     };
 
-    board.move_task(task, Column::Doing)?;
+    move_and_report(board, task, Column::Doing)?;
 
     if no_branch || std::env::var("AMD_NO_BRANCH").as_deref() == Ok("1") {
         return Ok(());
@@ -541,6 +542,15 @@ fn cmd_gui() -> Result<()> {
 #[cfg(not(feature = "gui"))]
 fn cmd_gui() -> Result<()> {
     bail!("this build has no desktop board — rebuild with --features gui")
+}
+
+/// Move a ticket and say so. The wording is the CLI's, not the library's —
+/// `Board::move_task` returns where the ticket landed and leaves the reporting
+/// to whoever asked for the move.
+fn move_and_report(board: &Board, task: &task::Task, to: Column) -> Result<()> {
+    board.move_task(task, to)?;
+    println!("moved {} -> {to}/", task.file_name());
+    Ok(())
 }
 
 /// An empty value reads better as a word than as nothing at all.

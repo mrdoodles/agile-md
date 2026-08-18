@@ -26,7 +26,6 @@ dependencies = [
  "eframe",
  "egui",
  "minijinja",
- "richrs",
  "serde",
  "tempfile",
  "time",
@@ -70,6 +69,7 @@ dependencies = [
  "clap_complete",
  "inquire",
  "libc",
+ "richrs",
  "tempfile",
 ]
 

@@ -494,7 +494,12 @@ impl Board {
 
     /// Move a task to another column, preferring `git mv` so the rename is
     /// tracked. Deliberately does not commit — that stays the user's call.
-    pub fn move_task(&self, task: &Task, to: Column) -> Result<()> {
+    ///
+    /// Returns where the ticket landed. It deliberately says nothing: a window
+    /// has nowhere to put a line of text, and a library that prints is a
+    /// library that has decided what its caller's output looks like
+    /// (docs/adr/0004-one-library-two-interfaces.md).
+    pub fn move_task(&self, task: &Task, to: Column) -> Result<PathBuf> {
         if task.column == to {
             bail!("already in {to}/");
         }
@@ -510,8 +515,7 @@ impl Board {
             fs::rename(&task.path, &dest)
                 .with_context(|| format!("moving {}", task.path.display()))?;
         }
-        println!("moved {} -> {to}/", task.file_name());
-        Ok(())
+        Ok(dest)
     }
 }
 

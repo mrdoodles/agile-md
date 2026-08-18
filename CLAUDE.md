@@ -27,12 +27,12 @@ crates/amd-ui/    → binary `amdui`  (egui/eframe)
 ```
 
 The library keeps the crate name `agile_md`, so every `use` in the workspace is
-unchanged. Still to move (docs/workspace-split.md): `render.rs` belongs in
-amd-cli, and `gui/` in amd-ui.
+unchanged. Still to move (docs/workspace-split.md): `gui/` belongs in amd-ui.
 
-- `crates/amd-lib/src/lib.rs` — the library: `board`, `branch`, `create`, `git`, `group`,
-  `registry`, `render`, `settings`, `task`, `templates` (and `gui` behind the
-  default feature).
+- `crates/amd-lib/src/lib.rs` — the library: `board`, `branch`, `create`,
+  `git`, `group`, `registry`, `settings`, `task`, `templates` (and `gui`
+  behind the feature, pending phase 4). **No `render`** — drawing is a front
+  end's business.
 - `crates/amd-lib/src/create.rs` — making a ticket, split into `Draft::prepare` (resolve and
   render, touching nothing) and `Draft::write` (file, child link, backlinks).
   That gap is what lets the CLI put the rendered ticket in `$EDITOR` before
@@ -63,8 +63,9 @@ amd-cli, and `gui/` in amd-ui.
 - `crates/amd-lib/src/branch.rs` — the branch-type taxonomy (`feature`, `bugfix`, `hotfix`,
   `release`, `chore`, overridable with `AMD_BRANCH_TYPES`) and git ref-name
   validation.
-- `crates/amd-lib/src/render.rs` — board output: a rich tree (`richrs`) on a terminal, plain
-  greppable text everywhere else. Moves to `amd-cli` under ADR-0004.
+- `crates/amd-cli/src/render.rs` — board output: a rich tree (`richrs`) on a
+  terminal, plain greppable text everywhere else. It lives in the CLI because
+  it is the CLI's output; `richrs` is not an amd-lib dependency.
 - `crates/amd-cli/src/completions.rs` — `amd completions [SHELL]`, generated from the clap
   command with `clap_complete`; `$SHELL` detection and install hints.
 - `crates/amd-cli/src/value.rs` — `TypedValueParser`s that advertise their possible values, so
@@ -111,6 +112,9 @@ amd-cli, and `gui/` in amd-ui.
   task (errors on 0 or >1 matches).
 - `Board::move_task()` uses `git mv` for tracked files (history follows the
   rename), else `fs::rename`. It does **not** commit — the user commits the move.
+  It returns where the ticket landed and **prints nothing** — `amd` prints
+  `moved X -> done/` from `move_and_report`, and the board says it with a card
+  that has moved.
 - `Board::archive()` (`amd rm`, aliased `amd junk`) moves a ticket to
   `<board>/archive/`, which is **not** a column: it's off the board and its
   contents are gitignored. That means `git mv` would refuse the ignored
@@ -161,7 +165,7 @@ amd-cli, and `gui/` in amd-ui.
   else derives one from `branch-type` and the title. **Order matters**: `git mv`
   is staged first so the rename travels with the switch.
 
-## Board rendering (`crates/amd-lib/src/render.rs`)
+## Board rendering (`crates/amd-cli/src/render.rs`)
 
 - Each column is a **tree**: `forest()` nests tasks by `parent`, ordered by id
   at every level. A child whose parent is in another column stays at the top
