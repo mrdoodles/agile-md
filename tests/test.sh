@@ -45,7 +45,8 @@ git init -q; git config user.email t@t.co; git config user.name t
 
 echo "init:"
 "${AMD}" init >/dev/null
-assert "init creates todo/doing/done" test -d tasks/todo -a -d tasks/doing -a -d tasks/done
+assert "init creates backlog/todo/doing/done" \
+  test -d tasks/backlog -a -d tasks/todo -a -d tasks/doing -a -d tasks/done
 assert "init writes the board README" test -f tasks/README.md
 
 echo "discovery from a subdirectory:"
@@ -57,25 +58,25 @@ echo "create:"
 "${AMD}" new "First task" >/dev/null
 "${AMD}" new "Second task" -t x -t y >/dev/null
 git add -A; git commit -qm seed
-assert "creates tasks/todo/001-first-task.md" test -f tasks/todo/001-first-task.md
-assert "title in frontmatter" grep -q '^title: "First task"$' tasks/todo/001-first-task.md
-assert "tags in frontmatter" grep -q '^tags: \[x,y\]$' tasks/todo/002-second-task.md
+assert "creates tasks/backlog/001-first-task.md (new work starts in the backlog)" test -f tasks/backlog/001-first-task.md
+assert "title in frontmatter" grep -q '^title: "First task"$' tasks/backlog/001-first-task.md
+assert "tags in frontmatter" grep -q '^tags: \[x,y\]$' tasks/backlog/002-second-task.md
 assert "a new ticket has no branch type by default" \
-  grep -q '^branch-type: ""$' tasks/todo/001-first-task.md
-assert "and so has no branch name" grep -q '^branch-name: ""$' tasks/todo/001-first-task.md
-assert "a new ticket is unassigned" grep -q '^assignee: ""$' tasks/todo/001-first-task.md
-assert "created date is filled in" grep -qE '^created: "[0-9]{4}-[0-9]{2}-[0-9]{2}"$' tasks/todo/001-first-task.md
+  grep -q '^branch-type: ""$' tasks/backlog/001-first-task.md
+assert "and so has no branch name" grep -q '^branch-name: ""$' tasks/backlog/001-first-task.md
+assert "a new ticket is unassigned" grep -q '^assignee: ""$' tasks/backlog/001-first-task.md
+assert "created date is filled in" grep -qE '^created: "[0-9]{4}-[0-9]{2}-[0-9]{2}"$' tasks/backlog/001-first-task.md
 
 echo "parents and the tree:"
 "${AMD}" new "Guest checkout" --branch-type bugfix >/dev/null
 "${AMD}" new "Address form" --parent 3 >/dev/null
-assert "the child records its parent id" grep -q '^parent: "003"$' tasks/todo/004-address-form.md
+assert "the child records its parent id" grep -q '^parent: "003"$' tasks/backlog/004-address-form.md
 assert "the child links back to the parent" \
-  bash -c "grep -q '^\[\[003-guest-checkout\]\]$' tasks/todo/004-address-form.md"
+  bash -c "grep -q '^\[\[003-guest-checkout\]\]$' tasks/backlog/004-address-form.md"
 assert "the parent lists the child" \
-  bash -c "grep -q '^- \[\[004-address-form\]\]$' tasks/todo/003-guest-checkout.md"
+  bash -c "grep -q '^- \[\[004-address-form\]\]$' tasks/backlog/003-guest-checkout.md"
 assert "a ticket with no parent has an empty parent field" \
-  bash -c "grep -q '^parent: \"\"$' tasks/todo/001-first-task.md"
+  bash -c "grep -q '^parent: \"\"$' tasks/backlog/001-first-task.md"
 assert "an unknown parent is rejected" bash -c "! '${AMD}' new 'Orphan' --parent 99"
 assert "the board nests a child under its parent" \
   bash -c "'${AMD}' board --plain | grep -q '^    \[004\] Address form'"
@@ -96,13 +97,13 @@ assert "empty columns say so" bash -c "'${AMD}' ls doing | grep -q '(empty)'"
 
 echo "branch types:"
 "${AMD}" new "Crash on save" --branch-type bugfix >/dev/null
-assert "the branch type is recorded" grep -q '^branch-type: "bugfix"$' tasks/todo/006-crash-on-save.md
+assert "the branch type is recorded" grep -q '^branch-type: "bugfix"$' tasks/backlog/006-crash-on-save.md
 assert "the branch name comes from the type and the title" \
-  grep -q '^branch-name: "bugfix/crash-on-save"$' tasks/todo/006-crash-on-save.md
+  grep -q '^branch-name: "bugfix/crash-on-save"$' tasks/backlog/006-crash-on-save.md
 assert "an unknown branch type is rejected, listing the valid ones" \
   bash -c "'${AMD}' new 'Nope' --branch-type feat 2>&1 | grep -q \"unknown branch type 'feat'\""
 assert "AMD_BRANCH_TYPES overrides the list" \
-  bash -c "AMD_BRANCH_TYPES='spike,chore' '${AMD}' new 'Try it' --branch-type spike >/dev/null && grep -q '^branch-name: \"spike/try-it\"\$' tasks/todo/007-try-it.md"
+  bash -c "AMD_BRANCH_TYPES='spike,chore' '${AMD}' new 'Try it' --branch-type spike >/dev/null && grep -q '^branch-name: \"spike/try-it\"\$' tasks/backlog/007-try-it.md"
 assert "there is one ticket template now" \
   bash -c "'${AMD}' templates | grep -q '^ticket' && ! '${AMD}' templates | grep -q '^admin'"
 assert "the board shows the branch type" \
@@ -143,7 +144,7 @@ echo "refs + ids:"
 assert "find by slug substring" test -f tasks/doing/002-second-task.md
 git checkout -q main 2>/dev/null || git checkout -q master
 "${AMD}" new "Third" >/dev/null
-assert "ids continue across columns (008)" test -f tasks/todo/008-third.md
+assert "ids continue across columns (008)" test -f tasks/backlog/008-third.md
 assert "unknown ref fails" bash -c "! '${AMD}' show 99"
 assert "ambiguous ref fails" bash -c "! '${AMD}' show task"
 assert "show prints the file" bash -c "'${AMD}' show 008 | grep -q '^title: \"Third\"$'"
@@ -160,11 +161,11 @@ assert "eject refuses to clobber without --force" \
 printf -- '---\nid: {{ id | yaml }}\ntitle: {{ title | yaml }}\ntype: {{ branch_type | yaml }}\nassignee: {{ extra.owner | yaml }}\n---\n\n## Custom\n' \
   > tasks/templates/ticket.md.jinja
 assert "board template overrides the built-in" \
-  bash -c "'${AMD}' new 'Overridden' -s owner=tim >/dev/null && grep -q '^## Custom$' tasks/todo/*-overridden.md"
+  bash -c "'${AMD}' new 'Overridden' -s owner=tim >/dev/null && grep -q '^## Custom$' tasks/backlog/*-overridden.md"
 assert "--set values reach the template" \
-  bash -c "grep -q '^assignee: \"tim\"$' tasks/todo/*-overridden.md"
+  bash -c "grep -q '^assignee: \"tim\"$' tasks/backlog/*-overridden.md"
 assert "labels reach a custom template" \
-  bash -c "grep -q '^type: \"\"$' tasks/todo/*-overridden.md"
+  bash -c "grep -q '^type: \"\"$' tasks/backlog/*-overridden.md"
 assert "templates list shows the board override" \
   bash -c "'${AMD}' templates | grep -q 'templates/ticket.md.jinja'"
 printf -- '---\nid: {{ id | yaml }}\nassignee: {{ extra.owner | yaml }}\ndue: {{ extra["due date"] | yaml }}\n---\n' \
@@ -182,7 +183,7 @@ rm -rf tasks/templates
 
 echo "the body editor:"
 assert "non-interactive create never opens an editor" \
-  bash -c "EDITOR=false '${AMD}' new 'No editor here' >/dev/null && test -f tasks/todo/*-no-editor-here.md"
+  bash -c "EDITOR=false '${AMD}' new 'No editor here' >/dev/null && test -f tasks/backlog/*-no-editor-here.md"
 assert "--no-edit is accepted alongside a title" \
   bash -c "'${AMD}' new 'Also no editor' --no-edit >/dev/null"
 assert "--edit and --no-edit conflict" \
@@ -191,35 +192,35 @@ assert "--edit and --no-edit conflict" \
 echo "quoting:"
 "${AMD}" new 'Fix the "quoted" thing' >/dev/null
 assert "a quote in the title is escaped, not left to break the frontmatter" \
-  bash -c "grep -qF 'title: \"Fix the \\\"quoted\\\" thing\"' tasks/todo/*-fix-the-quoted-thing.md"
+  bash -c "grep -qF 'title: \"Fix the \\\"quoted\\\" thing\"' tasks/backlog/*-fix-the-quoted-thing.md"
 
-echo "the junk drawer:"
-assert "init creates a junk drawer that keeps itself out of git" \
-  bash -c "test -f tasks/junk/.gitignore && grep -q '^\*$' tasks/junk/.gitignore"
+echo "the archive:"
+assert "init creates an archive that keeps itself out of git" \
+  bash -c "test -f tasks/archive/.gitignore && grep -q '^\*$' tasks/archive/.gitignore"
 "${AMD}" new "Bin this one" >/dev/null
 git add -A; git commit -qm junkable
 assert "rm takes a ticket off the board" \
-  bash -c "'${AMD}' rm bin-this-one | grep -q 'junked'"
-assert "the ticket is in the junk drawer" test -f tasks/junk/*-bin-this-one.md
+  bash -c "'${AMD}' rm bin-this-one | grep -q 'archived'"
+assert "the ticket is in the archive" test -f tasks/archive/*-bin-this-one.md
 assert "the board no longer shows it" \
   bash -c "! '${AMD}' board --plain | grep -q 'Bin this one'"
 assert "git records the ticket leaving the board" \
-  bash -c "git status --porcelain | grep -q '^D  tasks/todo/.*bin-this-one'"
-assert "junk stays out of git" bash -c "! git status --porcelain | grep -q 'tasks/junk/0'"
-assert "a junked ticket is no longer findable" bash -c "! '${AMD}' show bin-this-one"
-assert "ids are not reused after junking" \
-  bash -c "before=\$(ls tasks/junk | head -1 | cut -d- -f1); '${AMD}' new 'After the bin' >/dev/null; ! test -f tasks/todo/\${before}-after-the-bin.md"
+  bash -c "git status --porcelain | grep -q '^D  tasks/backlog/.*bin-this-one'"
+assert "the archive stays out of git" bash -c "! git status --porcelain | grep -q 'tasks/archive/0'"
+assert "an archived ticket is no longer findable" bash -c "! '${AMD}' show bin-this-one"
+assert "ids are not reused after archiving" \
+  bash -c "before=\$(ls tasks/archive | head -1 | cut -d- -f1); '${AMD}' new 'After the bin' >/dev/null; ! test -f tasks/backlog/\${before}-after-the-bin.md"
 assert "the counter records the next id" \
-  bash -c "test \"\$(cat tasks/.next-id)\" -gt \"\$(ls tasks/todo | tail -1 | cut -d- -f1 | sed 's/^0*//')\""
+  bash -c "test \"\$(cat tasks/.next-id)\" -gt \"\$(ls tasks/backlog | tail -1 | cut -d- -f1 | sed 's/^0*//')\""
 assert "a deleted ticket does not hand its id back" \
-  bash -c "'${AMD}' new 'Doomed' >/dev/null; id=\$(ls tasks/todo | grep doomed | cut -d- -f1); rm tasks/todo/\${id}-doomed.md; '${AMD}' new 'After the delete' >/dev/null; ! test -f tasks/todo/\${id}-after-the-delete.md"
+  bash -c "'${AMD}' new 'Doomed' >/dev/null; id=\$(ls tasks/backlog | grep doomed | cut -d- -f1); rm tasks/backlog/\${id}-doomed.md; '${AMD}' new 'After the delete' >/dev/null; ! test -f tasks/backlog/\${id}-after-the-delete.md"
 
 echo "assignees:"
 assert "a new ticket is unassigned" \
   bash -c "grep -q '^assignee: \"\"$' tasks/*/001-first-task.md"
 "${AMD}" new "Assigned at creation" -a alex >/dev/null
 assert "--assignee sets it at creation" \
-  bash -c "grep -q '^assignee: \"alex\"$' tasks/todo/*-assigned-at-creation.md"
+  bash -c "grep -q '^assignee: \"alex\"$' tasks/backlog/*-assigned-at-creation.md"
 assert "amd assign sets it afterwards" \
   bash -c "'${AMD}' assign 1 sam >/dev/null && grep -q '^assignee: \"sam\"$' tasks/*/001-first-task.md"
 assert "amd assign with no name clears it" \
@@ -250,7 +251,7 @@ assert "related is empty by default" \
   bash -c "grep -q '^related: \[\]$' tasks/*/001-first-task.md"
 "${AMD}" new "Depends on the first" --related 1 >/dev/null
 assert "--related records the id" \
-  bash -c "grep -q '^related: \[001\]$' tasks/todo/*-depends-on-the-first.md"
+  bash -c "grep -q '^related: \[001\]$' tasks/backlog/*-depends-on-the-first.md"
 assert "the other end is linked back" \
   bash -c "grep -qE '^related: \[0[0-9]+\]$' tasks/*/001-first-task.md"
 assert "an unknown related ref is rejected at creation" \
@@ -258,16 +259,65 @@ assert "an unknown related ref is rejected at creation" \
 assert "amd link relates two tickets both ways" \
   bash -c "'${AMD}' link 2 depends-on-the-first >/dev/null \
     && grep -q 'related: \[0' tasks/*/002-second-task.md \
-    && grep -q '002' tasks/todo/*-depends-on-the-first.md"
+    && grep -q '002' tasks/backlog/*-depends-on-the-first.md"
 assert "amd link is idempotent" \
   bash -c "'${AMD}' link 2 depends-on-the-first | grep -q 'already related'"
 assert "a task cannot be related to itself" \
   bash -c "'${AMD}' link 2 2 2>&1 | grep -q \"can't be related to itself\""
 "${AMD}" new "One way only" >/dev/null
 assert "amd link --one-way leaves the other end alone" \
-  bash -c "'${AMD}' link 2 one-way --one-way >/dev/null && ! grep -q '002' tasks/todo/*-one-way-only.md"
+  bash -c "'${AMD}' link 2 one-way --one-way >/dev/null && ! grep -q '002' tasks/backlog/*-one-way-only.md"
 assert "a ticket with no branch carries the list too" \
   bash -c "grep -q '^related: \[\]$' tasks/*/*-assigned-at-creation.md"
+
+# `amd set` and `amd group` shipped with no coverage here, which is how the
+# suite came to disagree with the tool. They get their own repository so the
+# epic and sprint directories cannot disturb the id sequencing above.
+echo "set:"
+work="$(mktemp -d)"
+( cd "${work}" && git init -q && git config user.email t@t.co && git config user.name t \
+  && AMD_YES=1 "${AMD}" init >/dev/null \
+  && "${AMD}" new "First" >/dev/null && "${AMD}" new "Second" >/dev/null )
+assert "set points sizes a ticket" \
+  bash -c "cd '${work}' && '${AMD}' set 001 points 5 | grep -q 'sized 5' && grep -q '^points: \"5\"\$' tasks/backlog/001-first.md"
+assert "set title rewrites the title, not the filename" \
+  bash -c "cd '${work}' && '${AMD}' set 001 title 'Renamed thing' | grep -q 'retitled' && grep -q '^title: \"Renamed thing\"\$' tasks/backlog/001-first.md"
+assert "set order ranks a ticket fractionally" \
+  bash -c "cd '${work}' && '${AMD}' set 002 order 1.5 | grep -q 'ranked 1.5' && grep -q '^order: \"1.5\"\$' tasks/backlog/002-second.md"
+assert "an unknown field is rejected" \
+  bash -c "cd '${work}' && ! '${AMD}' set 001 nonsense 1"
+
+echo "epics and sprints:"
+assert "an empty backlog says so" \
+  bash -c "cd '${work}' && '${AMD}' group list | grep -q 'no epics or sprints'"
+assert "group epic creates one" \
+  bash -c "cd '${work}' && '${AMD}' group epic checkout --description 'the checkout flow' | grep -q 'created epic checkout' && test -f tasks/backlog/checkout/_group.md"
+assert "group sprint records its length" \
+  bash -c "cd '${work}' && '${AMD}' group sprint sprint-1 --days 10 | grep -q 'created sprint sprint-1 (10 days)'"
+assert "a duplicate group is refused" \
+  bash -c "cd '${work}' && ! '${AMD}' group epic checkout"
+assert "set epic files the ticket into the epic directory" \
+  bash -c "cd '${work}' && '${AMD}' set 002 epic checkout | grep -q 'filed under checkout' && test -f tasks/backlog/checkout/002-second.md && grep -q '^epic: \"checkout\"\$' tasks/backlog/checkout/002-second.md"
+# Sizing keys are written on demand, not stubbed at creation — an unsized
+# ticket has no `points:` line at all, which is what an epic accepts and a
+# sprint refuses.
+assert "an epic takes an unsized ticket" \
+  bash -c "cd '${work}' && ! grep -q '^points:' tasks/backlog/checkout/002-second.md"
+assert "a sprint refuses an unsized ticket" \
+  bash -c "cd '${work}' && '${AMD}' set 002 epic sprint-1 2>&1 | grep -q 'needs points before it can go in sprint-1'"
+assert "a sprint takes a sized one" \
+  bash -c "cd '${work}' && '${AMD}' set 001 epic sprint-1 | grep -q 'filed under sprint-1' && test -f tasks/backlog/sprint-1/001-first.md"
+assert "group list totals tickets and points" \
+  bash -c "cd '${work}' && '${AMD}' group list | grep -qE 'sprint-1 +sprint +10d +pending +1 ticket\(s\), 5 point\(s\)'"
+assert "starting a sprint says so" \
+  bash -c "cd '${work}' && '${AMD}' group start sprint-1 | grep -q 'started'"
+assert "a started sprint gives nothing back" \
+  bash -c "cd '${work}' && '${AMD}' set 001 epic checkout 2>&1 | grep -q 'has started; its tickets are fixed'"
+assert "a started sprint takes nothing more" \
+  bash -c "cd '${work}' && '${AMD}' set 002 points 3 >/dev/null && '${AMD}' set 002 epic sprint-1 2>&1 | grep -q 'has started; nothing more can be added'"
+assert "starting an unknown group fails" \
+  bash -c "cd '${work}' && ! '${AMD}' group start nope"
+rm -rf "${work}"
 
 echo "pipes:"
 assert "the board survives a closed pipe" \
@@ -298,6 +348,23 @@ assert "completions work without a board" \
   bash -c "cd '${nongit}' && '${AMD}' completions bash | grep -q '_amd'"
 rm -f comp.bash
 
+# The desktop board is a second binary, so the suite checks it was built and
+# that it answers without opening a window — a headless runner can't do more
+# than that, and this is what catches `amdui` disappearing from Cargo.toml.
+# A --no-default-features build has no amdui, and that's not a failure.
+echo "the desktop binary:"
+AMDUI="${AMDUI_BIN:-${ROOT}/target/debug/amdui}"
+if [ -x "${AMDUI}" ]; then
+  assert "amdui --version names itself" \
+    bash -c "'${AMDUI}' --version | grep -q '^amdui '"
+  assert "amdui --help mentions the board" \
+    bash -c "'${AMDUI}' --help | grep -q 'desktop board'"
+  assert "amdui rejects an unknown argument" \
+    bash -c "! '${AMDUI}' --nope"
+else
+  echo "  skip - no amdui binary (built without the gui feature)"
+fi
+
 echo "guards:"
 assert "errors outside a git repository" \
   bash -c "cd '${nongit}' && ! '${AMD}' board"
@@ -314,7 +381,7 @@ assert "--no-input works without the env var" \
 
 echo "AMD_DIR:"
 assert "AMD_DIR relocates the board" \
-  bash -c "cd '${tmp}' && AMD_DIR=work AMD_YES=1 '${AMD}' new 'Elsewhere' >/dev/null && test -f work/todo/001-elsewhere.md"
+  bash -c "cd '${tmp}' && AMD_DIR=work AMD_YES=1 '${AMD}' new 'Elsewhere' >/dev/null && test -f work/backlog/001-elsewhere.md"
 
 echo "auto-create when no board exists:"
 fresh="$(mktemp -d)"; ( cd "${fresh}" && git init -q )
