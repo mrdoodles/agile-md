@@ -6,8 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `agile-md` is a tiny **filesystem Kanban**. It ships two binaries over one
 library — **`amd`**, the command line, and **`amdui`**, the desktop board —
-which manage markdown task files moved between `todo/`, `doing/` and `done/`
-directories. Board data lives in each *consuming* repo at `<repo-root>/tasks/`;
+which manage markdown task files moved between `backlog/`, `todo/`, `doing/`
+and `done/` directories. Board data lives in each *consuming* repo at `<repo-root>/tasks/`;
 they're installed globally and operate on whatever repo you're in. Rust +
 `git`, shipped as static binaries — no runtime, no daemon, no database.
 Design principles: **status is the folder**, **git history is the audit trail**
@@ -19,8 +19,9 @@ MiniJinja templates**.
 The crate is a **library plus two binaries**, so the command line and the
 desktop board share one implementation of the board.
 
-- `src/lib.rs` — the library: `board`, `branch`, `create`, `git`, `render`,
-  `task`, `templates` (and `gui` behind the default feature).
+- `src/lib.rs` — the library: `board`, `branch`, `create`, `git`, `group`,
+  `registry`, `render`, `settings`, `task`, `templates` (and `gui` behind the
+  default feature).
 - `src/create.rs` — making a ticket, split into `Draft::prepare` (resolve and
   render, touching nothing) and `Draft::write` (file, child link, backlinks).
   That gap is what lets the CLI put the rendered ticket in `$EDITOR` before
@@ -48,10 +49,11 @@ desktop board share one implementation of the board.
   overrides, `TaskContext`, `required_extras`.
 - `src/form.rs` — every interactive prompt, built on `inquire` (text, select,
   confirm, task picker, label autocomplete).
-- `src/branch.rs` — the label taxonomy: conventional-commit types, the
-  type -> branch-prefix map, and git ref-name validation.
-- `src/render.rs` — board output: rich tables (`richrs`) on a terminal, plain
-  greppable text everywhere else.
+- `src/branch.rs` — the branch-type taxonomy (`feature`, `bugfix`, `hotfix`,
+  `release`, `chore`, overridable with `AMD_BRANCH_TYPES`) and git ref-name
+  validation.
+- `src/render.rs` — board output: a rich tree (`richrs`) on a terminal, plain
+  greppable text everywhere else. Moves to `amd-cli` under ADR-0004.
 - `src/completions.rs` — `amd completions [SHELL]`, generated from the clap
   command with `clap_complete`; `$SHELL` detection and install hints.
 - `src/value.rs` — `TypedValueParser`s that advertise their possible values, so
@@ -74,6 +76,9 @@ desktop board share one implementation of the board.
   **`rust-release` packages one binary** (`bin-name`), so a release currently
   ships `amd` without `amdui`; `amd gui` is why that costs nothing. Shipping
   both means teaching `rust-release` a list.
+- `docs/adr/` — architecture decision records: why the tool is shaped as it
+  is, and what each decision costs. `docs/workspace-split.md` is the plan for
+  the amd-lib / amd-cli / amd-ui split (ADR-0004).
 - `README.md`, `LICENSE` (MIT).
 
 ## How `amd` works (architecture)
@@ -82,30 +87,37 @@ desktop board share one implementation of the board.
   so `amd` works from any subdirectory; it errors if not inside a git repo.
 - Tasks are `NNN-slug.md`. `Board::next_id()` takes whichever is higher of the
   counter in `<board>/.next-id` and one past the highest id in the columns. The
-  counter is the authority — it remembers ids whose tickets have gone, junked or
-  deleted, which no scan can — and the scan is the safety net, so a lost or
+  counter is the authority — it remembers ids whose tickets have gone, archived
+  or deleted, which no scan can — and the scan is the safety net, so a lost or
   badly merged counter can't hand out an id already in use. `record_id()` runs
-  in `Draft::write`, not `prepare`: an abandoned draft leaves no gap. The junk
-  drawer isn't scanned; the counter covers it.
+  in `Draft::write`, not `prepare`: an abandoned draft leaves no gap. The
+  archive isn't scanned; the counter covers it.
+- The columns are `backlog`, `todo`, `doing`, `done` (`Column::ALL`, in that
+  order). **`amd new` lands in `backlog/`** — new work is raised, then pulled
+  into `todo` when someone means to do it. `tests/test.sh` drifted from the
+  tool for exactly this reason, so it is worth stating plainly.
 - `Board::find(<ref>)` resolves a numeric id or a unique slug substring to one
   task (errors on 0 or >1 matches).
 - `Board::move_task()` uses `git mv` for tracked files (history follows the
   rename), else `fs::rename`. It does **not** commit — the user commits the move.
-- `Board::junk()` (`amd rm`) moves a ticket to `<board>/junk/`, which is **not**
-  a column: it's off the board and its contents are gitignored. That means
-  `git mv` would refuse the ignored destination and forcing it would put the
-  junk back into the history the `.gitignore` exists to keep out, so a tracked
-  ticket is `git rm --cached`'d and then moved. Junked ids are never reused —
-  that's the counter's job — because reusing one would silently repoint every
-  `parent` and `related` that named it.
+- `Board::archive()` (`amd rm`, aliased `amd junk`) moves a ticket to
+  `<board>/archive/`, which is **not** a column: it's off the board and its
+  contents are gitignored. That means `git mv` would refuse the ignored
+  destination and forcing it would put the ticket back into the history the
+  `.gitignore` exists to keep out, so a tracked ticket is `git rm --cached`'d
+  and then moved. Archived ids are never reused — that's the counter's job —
+  because reusing one would silently repoint every `parent` and `related` that
+  named it.
 - `Board::ensure()` runs before any board-requiring command: if there's no
   board, it prompts to create one when interactive (`stdin().is_terminal()`),
   auto-creates when `AMD_YES=1`, and otherwise errors (never hangs
   non-interactively).
-- Env vars: `AMD_DIR` (board dir name, default `tasks`), `AMD_TYPES` (type
-  labels), `AMD_YES` (force-create), `AMD_NO_INPUT` (never prompt),
-  `AMD_NO_BRANCH` (never touch branches), `NO_COLOR`/`--plain` (plain board),
-  `EDITOR` (for `amd edit`).
+- Env vars: `AMD_DIR` (board dir name, default `tasks`), `AMD_BRANCH_TYPES`
+  (the branch types on offer), `AMD_YES` (force-create), `AMD_NO_INPUT` (never
+  prompt), `AMD_NO_BRANCH` (never touch branches), `AMD_NO_REGISTER` (keep the
+  repository list manual), `NO_COLOR`/`--plain` (plain board), `EDITOR` (for
+  `amd edit`). **`AMD_TYPES` is dead** — it was in `--help` long after nothing
+  read it.
 
 ## Ticket fields (`src/branch.rs`, `templates/ticket.md.jinja`)
 
@@ -238,7 +250,8 @@ desktop board share one implementation of the board.
 - Value-level completion comes from `src/value.rs`. `TypedValueParser` lets a
   parser advertise `possible_values()` (used by completions and `--help`) while
   `parse_ref()` keeps our own validation and error text — `PossibleValuesParser`
-  alone would have replaced "unknown type 'x' … set AMD_TYPES" with clap's
+  alone would have replaced "unknown branch type 'x' … set AMD_BRANCH_TYPES"
+  with clap's
   wording. `TicketType` advertises the built-ins but accepts any name, since a
   board can add templates.
 - `clap`'s `string` feature is on for `Str: From<String>`, which the runtime
@@ -285,8 +298,9 @@ changes):
   `AMD_YES`/`AMD_DIR`.
 - **v4** — bash script → **Rust binary**; tasks rendered from MiniJinja
   templates; `inquire` forms when a value is missing; one flexible ticket whose
-  `branch-type` decides whether `amd start` makes a branch; a terminal UI.
-  Install downloads a prebuilt binary instead of copying a script. The v3 CLI and board
+  `branch-type` decides whether `amd start` makes a branch; a desktop board.
+  Two binaries over one library: `amd` and `amdui`. Install downloads a
+  prebuilt binary instead of copying a script. The v3 CLI and board
   layout still work; v3 task files simply have no labels, so `amd start` on one
   leaves the branch alone.
 

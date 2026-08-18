@@ -27,7 +27,8 @@ impl TypedValueParser for BranchType {
         value: &OsStr,
     ) -> Result<String, Error> {
         let value = value.to_string_lossy().into_owned();
-        // Our own message: it names the offending value and points at AMD_TYPES.
+        // Our own message: it names the offending value and points at
+        // AMD_BRANCH_TYPES.
         branch::validate_branch_type(&value)
             .map_err(|err| Error::raw(ErrorKind::InvalidValue, format!("{err}\n")))?;
         Ok(value)

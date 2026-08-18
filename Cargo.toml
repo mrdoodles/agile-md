@@ -38,7 +38,7 @@ richrs = "0.2"
 serde = { version = "1", features = ["derive"] }
 time = { version = "0.3", features = ["formatting", "local-offset", "macros"] }
 
-# GUI only — see the [features] section.
+# Shell completions, generated from the clap command.
 clap_complete = "4"
 
 # Desktop GUI — the same stack as rustmark, so the two look and feel alike

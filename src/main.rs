@@ -31,22 +31,29 @@ A <REF> is a task id (e.g. 7 or 007) or a unique slug substring. Leave it out
 in a terminal and amd asks: `amd new` fills in a form, `amd start` offers a
 list of tasks to pick from.
 
-There are two ticket types: development and admin. Development work is
-tracked on a branch named from its change type (feat, fix, docs, … — the
-conventional commit types), so `amd start` on a feat titled \"Add login\"
-creates and switches to feature/add-login. Admin work — a rota, a renewal,
-an approval — has nothing to check out, so it gets no branch.
+One kind of ticket. A branch type — feature, bugfix, hotfix, release,
+chore — is what gives it a branch, so `amd start` on a bugfix titled
+\"Crash on save\" creates and switches to bugfix/crash-on-save. Leave it out
+and there is nothing to check out: `amd start` moves the ticket and leaves
+the working tree alone.
+
+New tickets land in backlog/. `amd set` sizes and files them; `amd group`
+divides the backlog into epics and sprints.
 
 Tickets nest: `--parent <ref>` puts one under another, and the board shows
-the tree. That covers epics and stories without separate fields.
+the tree. Nesting is the parent/child relationship; an epic or sprint is a
+folder the backlog is divided into. A ticket can have both.
 
 Environment:
-  AMD_DIR       board directory name under the repository root (default: tasks)
-  AMD_TYPES     comma-separated change types (default: conventional commits)
-  AMD_YES       set to 1 to create a missing board without prompting
-  AMD_NO_INPUT  set to 1 to never prompt (same as --no-input)
-  AMD_NO_BRANCH set to 1 to never create branches (same as --no-branch)
-  EDITOR        editor used by `amd edit` (default: vi)
+  AMD_DIR           board directory name under the repository root (default: tasks)
+  AMD_BRANCH_TYPES  comma-separated branch types (default: feature, bugfix,
+                    hotfix, release, chore)
+  AMD_YES           set to 1 to create a missing board without prompting
+  AMD_NO_INPUT      set to 1 to never prompt (same as --no-input)
+  AMD_NO_BRANCH     set to 1 to never create branches (same as --no-branch)
+  AMD_NO_REGISTER   set to 1 to keep the repository list manual
+  NO_COLOR          set to any value for plain output (same as --plain)
+  EDITOR            editor used by `amd edit` (default: vi)
 
 Creating a task interactively ends in $EDITOR with the rendered ticket, so
 the notes and checklist get filled in there and then (--no-edit to skip).
@@ -213,7 +220,8 @@ struct NewArgs {
     /// Tag to add (repeatable)
     #[arg(short = 't', long = "tag", value_name = "TAG")]
     tags: Vec<String>,
-    /// Ticket type: development (the default) or admin
+    /// Template to render the ticket from (default: ticket). A board can add
+    /// its own under <board>/templates/
     #[arg(
         short = 'T',
         long = "template",

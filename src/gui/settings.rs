@@ -4,7 +4,7 @@
 //! persist its own memory, but only when eframe is built with its
 //! `persistence` feature, and that stores the choice in eframe's blob rather
 //! than the file the rest of agile-md uses — so the theme is kept here
-//! instead, next to the TUI's.
+//! instead, in the shared config.
 
 use crate::settings::Config;
 
@@ -106,7 +106,7 @@ impl GuiSettings {
         }
     }
 
-    /// Write both keys, keeping everything else in the file — the TUI's theme
+    /// Write both keys, keeping everything else in the file — another writer's
     /// lives there too.
     pub fn save(&self) -> anyhow::Result<()> {
         let path = crate::settings::path().ok_or_else(|| anyhow::anyhow!("no config directory"))?;
@@ -155,7 +155,7 @@ mod tests {
     fn a_choice_is_still_there_the_next_time_the_board_opens() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("agile-md/config");
-        // A board that has been used before: the TUI has a theme here too.
+        // A config that has been written before, with a key we do not own.
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, "theme = nord\n").unwrap();
 
@@ -173,7 +173,7 @@ mod tests {
         assert_eq!(
             Config::load_from(&path).get("theme"),
             Some("nord"),
-            "the TUI's theme must not be collateral damage"
+            "another writer's key must not be collateral damage"
         );
     }
 

@@ -336,8 +336,10 @@ assert "completions know the subcommands" \
   bash -c "'${AMD}' completions bash 2>/dev/null | grep -q 'link' && '${AMD}' completions fish 2>/dev/null | grep -q 'templates'"
 assert "completions offer the change types" \
   bash -c "'${AMD}' completions fish 2>/dev/null | grep -q 'feat'"
-assert "completions offer the ticket types" \
-  bash -c "'${AMD}' completions fish 2>/dev/null | grep -q 'development'"
+assert "completions offer the branch types" \
+  bash -c "'${AMD}' completions fish 2>/dev/null | grep -q 'bugfix'"
+assert "completions offer the set fields" \
+  bash -c "'${AMD}' completions bash 2>/dev/null | grep -q 'points epic order title'"
 assert "the shell is taken from \$SHELL when not given" \
   bash -c "SHELL=/bin/zsh '${AMD}' completions 2>/dev/null | head -1 | grep -q '^#compdef amd$'"
 assert "an unknown shell errors with the choices" \

@@ -97,12 +97,18 @@ mod tests {
 
     #[test]
     fn scripts_complete_the_values_too() {
-        // The parsers advertise their possible values, so `--type <TAB>`
-        // offers change types rather than falling back to filenames.
+        // The parsers advertise their possible values, so `--branch-type <TAB>`
+        // offers branch types rather than falling back to filenames.
+        //
+        // These used to assert on "feat" and "development" — words that only
+        // ever appeared in help text describing ticket types that no longer
+        // exist. The assertions passed because the documentation was wrong, so
+        // pin them to values a parser actually advertises.
         let fish = script(Shell::Fish);
-        assert!(fish.contains("feat"), "{fish}");
-        assert!(fish.contains("development"), "{fish}");
+        assert!(fish.contains("bugfix"), "{fish}");
+        assert!(fish.contains("ticket"), "{fish}");
         let bash = script(Shell::Bash);
         assert!(bash.contains("todo doing done all"), "{bash}");
+        assert!(bash.contains("points epic order title"), "{bash}");
     }
 }

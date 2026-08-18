@@ -51,7 +51,7 @@ amd done  1                       # doing -> done
 amd back  1                       # move one column left
 amd show  publish                 # print a task (id or slug substring)
 amd edit  1                       # open in $EDITOR
-amd rm    1                       # take it off the board, into tasks/junk/
+amd rm    1                       # take it off the board, into tasks/archive/
 amd link  1 3                     # relate two tickets
 ```
 
@@ -248,10 +248,11 @@ amd completions fish > ~/.config/fish/completions/amd.fish
 powershell are available too. The script goes to stdout and the install hint to
 stderr, so redirecting gives you a clean file.
 
-Completion covers values, not just names — `amd new --type <TAB>` offers the
-change types this board accepts (including anything you added with `AMD_TYPES`),
-`-T <TAB>` the ticket types, `amd ls <TAB>` the columns. Scripts are generated
-from the CLI itself, so they can't drift from it.
+Completion covers values, not just names — `amd new --branch-type <TAB>` offers
+the branch types this board accepts (including anything you added with
+`AMD_BRANCH_TYPES`), `-T <TAB>` the templates, `amd ls <TAB>` the columns, and
+`amd set <ref> <TAB>` the fields. Scripts are generated from the CLI itself, so
+they can't drift from it.
 
 ## The board
 

@@ -407,7 +407,7 @@ impl Board {
             let path = entry
                 .with_context(|| format!("reading {}", dir.display()))?
                 .path();
-            // Junked tickets keep the column they were last in; nothing reads
+            // Archived tickets keep the column they were last in; nothing reads
             // it, but it means a restored file lands somewhere sensible.
             if path.is_file()
                 && let Some(task) = Task::from_path(&path, Column::Todo)
@@ -452,7 +452,7 @@ impl Board {
     /// Take a ticket off the board. The archive is gitignored, so a
     /// tracked ticket leaves the index (`git rm --cached`) and then moves —
     /// `git mv` would refuse the ignored destination, and forcing it would put
-    /// the junk back into the history the .gitignore is there to keep it out of.
+    /// the ticket back into the history the .gitignore is there to keep it out of.
     pub fn archive(&self, task: &Task) -> Result<PathBuf> {
         let dir = self.archive_dir();
         fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
@@ -707,7 +707,7 @@ mod tests {
         let board = board_at(dir.path());
         touch(&board, "001-one.md");
         board.record_id(1).unwrap();
-        // Deleted outright, not junked: nothing on disk remembers it.
+        // Deleted outright, not archived: nothing on disk remembers it.
         fs::remove_file(board.dir(Column::Todo).join("001-one.md")).unwrap();
         assert_eq!(board.next_id().unwrap(), 2, "the counter still knows");
     }

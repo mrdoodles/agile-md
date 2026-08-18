@@ -1,9 +1,10 @@
 //! The config file the front ends share.
 //!
 //! One `key = value` per line: greppable, hand-editable, no parser dependency.
-//! Anything unrecognised is kept as it was rather than dropped, so the TUI
-//! writing its theme cannot delete the GUI's settings and vice versa — the
-//! whole reason this is a shared type rather than a `fs::write` in each.
+//! Anything unrecognised is kept as it was rather than dropped, so one writer
+//! cannot delete another's keys — the whole reason this is a shared type
+//! rather than a `fs::write` in each front end. The library owns the file;
+//! each front end owns the meaning of the keys in its own namespace.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -103,7 +104,7 @@ mod tests {
         let path = dir.path().join("config");
         fs::write(&path, "theme = nord\ngui.font = large\n").unwrap();
 
-        // The TUI saving its theme must not delete the GUI's settings.
+        // One front end saving its theme must not delete another's settings.
         let mut config = Config::load_from(&path);
         config.set("theme", "gruvbox");
         config.save_to(&path).unwrap();
