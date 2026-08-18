@@ -18,6 +18,16 @@ path = "src/lib.rs"
 name = "amd"
 path = "src/main.rs"
 
+# The desktop board as a binary of its own. An app is something you launch, not
+# a subcommand you have to remember — `amdui` is `amd gui` without the `amd
+# gui`. It is a few lines over the library, so the two front ends stay one
+# implementation of the board. `required-features` means a build without the
+# `gui` feature simply doesn't produce it, rather than failing to compile.
+[[bin]]
+name = "amdui"
+path = "src/bin/amdui.rs"
+required-features = ["gui"]
+
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive", "string"] }

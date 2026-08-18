@@ -30,9 +30,13 @@ into `/usr/local/bin` when it's writable, otherwise `~/bin`. Override with
 `--from-source` (needs [Rust](https://rustup.rs)). From a clone:
 
 ```bash
-cargo build --release        # target/release/amd
+cargo build --release        # target/release/{amd,amdui}
 ./install.sh                 # builds and installs
 ```
+
+Two commands: **`amd`** is the command line, **`amdui`** is the desktop board.
+The release zip carries `amd` alone for now, which loses nothing — `amd gui`
+opens the same window.
 
 ## Use
 
@@ -176,8 +180,10 @@ board as `@sam`, so it moves with the file and is visible in the diff.
 
 ## The desktop board
 
-`amd gui` opens the board in a window, across every registered repository at
-once:
+`amdui` opens the board in a window, across every registered repository at
+once. It's the front end as its own command — launch it from a dock or a
+runner, no subcommand to remember — and `amd gui` opens the same window if
+you're already in a terminal:
 
 ```
 BACKLOG (4)      TODO (3)         DOING (1)        DONE (7)
@@ -204,7 +210,8 @@ An **epic** takes anything: it is where work goes before anyone has estimated
 it.
 
 The board is a default feature; `--no-default-features` builds the command line
-alone, which is what CI and scripts want.
+alone — no `amdui` binary and no windowing stack — which is what CI and scripts
+want.
 
 ## Driving it from the command line
 

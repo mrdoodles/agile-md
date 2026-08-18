@@ -122,79 +122,6 @@ pub fn join(lines: &[String]) -> String {
     lines.join("\n")
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn checkboxes_are_recognised_either_way_round() {
-        assert_eq!(
-            classify("- [ ] wash up"),
-            Kind::Check {
-                indent: String::new(),
-                done: false,
-                text: "wash up".into()
-            }
-        );
-        assert_eq!(
-            classify("  - [x] done it"),
-            Kind::Check {
-                indent: "  ".into(),
-                done: true,
-                text: "done it".into()
-            }
-        );
-    }
-
-    #[test]
-    fn toggling_preserves_everything_but_the_box() {
-        assert_eq!(toggle("- [ ] wash up"), "- [x] wash up");
-        assert_eq!(toggle("- [x] wash up"), "- [ ] wash up");
-        assert_eq!(toggle("  - [x] indented"), "  - [ ] indented");
-        // Not a checkbox: left alone rather than mangled.
-        assert_eq!(toggle("- a bullet"), "- a bullet");
-        assert_eq!(toggle("## A heading"), "## A heading");
-    }
-
-    #[test]
-    fn a_body_survives_a_round_trip_untouched() {
-        let body = "\n## Notes\n\n- [ ] one\n- [x] two\n\ntrailing words\n";
-        assert_eq!(join(&lines(body)), body, "the source is the document");
-    }
-
-    #[test]
-    fn enter_continues_a_list_but_does_not_start_one() {
-        assert_eq!(continuation("- [ ] one").as_deref(), Some("- [ ] "));
-        assert_eq!(continuation("- one").as_deref(), Some("- "));
-        assert_eq!(continuation("  * one").as_deref(), Some("  * "));
-        // Plain text and headings do not become lists.
-        assert_eq!(continuation("just words"), None);
-        assert_eq!(continuation("## Notes"), None);
-        // An empty item ends the list rather than making another.
-        assert_eq!(continuation("- [ ] "), None);
-        assert_eq!(continuation("- "), None);
-    }
-
-    #[test]
-    fn headings_need_a_space_so_hashtags_stay_text() {
-        assert_eq!(
-            classify("### Acceptance criteria"),
-            Kind::Heading {
-                level: 3,
-                text: "Acceptance criteria".into()
-            }
-        );
-        assert_eq!(classify("#hashtag"), Kind::Text);
-    }
-
-    #[test]
-    fn a_bullet_keeps_its_marker_when_continued() {
-        // Continuing a "*" list with "-" would rewrite the author's style.
-        assert_eq!(continuation("* one").as_deref(), Some("* "));
-        assert_eq!(continuation("+ one").as_deref(), Some("+ "));
-    }
-}
-
 /// Draw a body as rich text, editing one line at a time.
 ///
 /// Returns whether the body changed. `editing` is the line being typed into
@@ -320,4 +247,77 @@ pub fn ui(ui: &mut egui::Ui, body: &mut String, editing: &mut Editing) -> bool {
         *body = join(&rows);
     }
     changed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn checkboxes_are_recognised_either_way_round() {
+        assert_eq!(
+            classify("- [ ] wash up"),
+            Kind::Check {
+                indent: String::new(),
+                done: false,
+                text: "wash up".into()
+            }
+        );
+        assert_eq!(
+            classify("  - [x] done it"),
+            Kind::Check {
+                indent: "  ".into(),
+                done: true,
+                text: "done it".into()
+            }
+        );
+    }
+
+    #[test]
+    fn toggling_preserves_everything_but_the_box() {
+        assert_eq!(toggle("- [ ] wash up"), "- [x] wash up");
+        assert_eq!(toggle("- [x] wash up"), "- [ ] wash up");
+        assert_eq!(toggle("  - [x] indented"), "  - [ ] indented");
+        // Not a checkbox: left alone rather than mangled.
+        assert_eq!(toggle("- a bullet"), "- a bullet");
+        assert_eq!(toggle("## A heading"), "## A heading");
+    }
+
+    #[test]
+    fn a_body_survives_a_round_trip_untouched() {
+        let body = "\n## Notes\n\n- [ ] one\n- [x] two\n\ntrailing words\n";
+        assert_eq!(join(&lines(body)), body, "the source is the document");
+    }
+
+    #[test]
+    fn enter_continues_a_list_but_does_not_start_one() {
+        assert_eq!(continuation("- [ ] one").as_deref(), Some("- [ ] "));
+        assert_eq!(continuation("- one").as_deref(), Some("- "));
+        assert_eq!(continuation("  * one").as_deref(), Some("  * "));
+        // Plain text and headings do not become lists.
+        assert_eq!(continuation("just words"), None);
+        assert_eq!(continuation("## Notes"), None);
+        // An empty item ends the list rather than making another.
+        assert_eq!(continuation("- [ ] "), None);
+        assert_eq!(continuation("- "), None);
+    }
+
+    #[test]
+    fn headings_need_a_space_so_hashtags_stay_text() {
+        assert_eq!(
+            classify("### Acceptance criteria"),
+            Kind::Heading {
+                level: 3,
+                text: "Acceptance criteria".into()
+            }
+        );
+        assert_eq!(classify("#hashtag"), Kind::Text);
+    }
+
+    #[test]
+    fn a_bullet_keeps_its_marker_when_continued() {
+        // Continuing a "*" list with "-" would rewrite the author's style.
+        assert_eq!(continuation("* one").as_deref(), Some("* "));
+        assert_eq!(continuation("+ one").as_deref(), Some("+ "));
+    }
 }

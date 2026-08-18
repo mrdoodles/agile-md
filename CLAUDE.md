@@ -4,19 +4,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Scope
 
-`agile-md` is a tiny **filesystem Kanban**. The whole tool is the `amd` binary:
-it manages markdown task files moved between `todo/`, `doing/` and `done/`
+`agile-md` is a tiny **filesystem Kanban**. It ships two binaries over one
+library — **`amd`**, the command line, and **`amdui`**, the desktop board —
+which manage markdown task files moved between `todo/`, `doing/` and `done/`
 directories. Board data lives in each *consuming* repo at `<repo-root>/tasks/`;
-`amd` is installed globally and operates on whatever repo you're in. Rust +
-`git`, shipped as a single static binary — no runtime, no daemon, no database.
+they're installed globally and operate on whatever repo you're in. Rust +
+`git`, shipped as static binaries — no runtime, no daemon, no database.
 Design principles: **status is the folder**, **git history is the audit trail**
 (moves are `git mv`), tasks are self-describing markdown **rendered from
 MiniJinja templates**.
 
 ## Layout
 
-The crate is a **library plus a binary**, so the CLI and the terminal UI share
-one implementation of the board.
+The crate is a **library plus two binaries**, so the command line and the
+desktop board share one implementation of the board.
 
 - `src/lib.rs` — the library: `board`, `branch`, `create`, `git`, `render`,
   `task`, `templates` (and `gui` behind the default feature).
@@ -30,8 +31,13 @@ one implementation of the board.
 - `src/group.rs` — epics and sprints: the folders a backlog is divided into.
 - `src/settings.rs` — the shared config file, which keeps keys it does not
   recognise so one writer cannot delete another's.
-- `src/main.rs` — clap CLI and command handlers; the binary also owns
+- `src/main.rs` — the `amd` binary: clap CLI and command handlers; it also owns
   `form.rs`, `value.rs` and `completions.rs`, which are CLI-only.
+- `src/bin/amdui.rs` — the `amdui` binary: ~50 lines that call
+  `agile_md::gui::run()`, so the board is something you launch rather than a
+  subcommand you remember. `required-features = ["gui"]` in Cargo.toml means a
+  `--no-default-features` build simply doesn't produce it. `amd gui` stays —
+  it's the same call, and it's what a prebuilt install has (see below).
 - `src/board.rs` — board discovery (`<repo-root>/${AMD_DIR:-tasks}`), the
   `Column` enum, task lookup, moves, `ensure`/`create`.
 - `src/task.rs` — `Task` (path, column, id, stem), frontmatter `meta` lookup,
@@ -56,13 +62,18 @@ one implementation of the board.
   binary.
 - `install.sh` — downloads the prebuilt `amd-<target>.zip` from the GitHub
   release, or builds from source in a clone (`--from-source`, `--dir`,
-  `--version`). Keep the two paths in sync.
+  `--version`). Keep the two paths in sync. A source build installs `amdui`
+  too; both paths copy it only `if [ -f ... ]`, since the zip carries `amd`
+  alone and a `--no-default-features` build produces no `amdui`.
 - `tests/test.sh` — assert-based end-to-end suite; builds with cargo and spins
   up temp git repos. Unit tests live next to the code in `#[cfg(test)] mod tests`.
 - `.github/workflows/ci.yml` — fmt + clippy + cargo test + tests/test.sh, and
   shellcheck for the shell files.
 - `.github/workflows/release.yml` — on a `vX.Y.Z` tag, calls
   `mrdoodles/rust-release` to build and attach `amd-<target>.zip` per platform.
+  **`rust-release` packages one binary** (`bin-name`), so a release currently
+  ships `amd` without `amdui`; `amd gui` is why that costs nothing. Shipping
+  both means teaching `rust-release` a list.
 - `README.md`, `LICENSE` (MIT).
 
 ## How `amd` works (architecture)
@@ -284,6 +295,9 @@ changes):
 - egui/eframe, the same stack as rustmark, so the two look alike and a ticket
   body could be handed to it. `App::ui` takes a `&mut Ui`, not a context —
   0.36 moved panels onto `Ui`.
+- Two ways in, one `gui::run()`: the `amdui` binary and `amd gui`. Neither
+  needs a board — both resolve repositories through the registry, so the
+  window opens from anywhere.
 - Drops are collected during the frame and applied after it, so the UI never
   mutates files mid-draw, and every one goes through `Board::move_task` or
   `Board::set_epic` — the same calls the CLI makes. The GUI must never write a

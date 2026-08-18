@@ -170,7 +170,8 @@ enum Cmd {
         #[arg(long)]
         one_way: bool,
     },
-    /// Open the desktop board across every registered repository
+    /// Open the desktop board across every registered repository (same window
+    /// as the `amdui` command)
     Gui,
     /// Print a shell completion script (bash, zsh, fish, …)
     Completions {
@@ -337,7 +338,8 @@ fn run() -> Result<()> {
     }
 
     // The desktop board draws every registered repository, so it must not
-    // insist on standing in one — `amd gui` works from anywhere.
+    // insist on standing in one — `amd gui` works from anywhere. The `amdui`
+    // binary is the same call without the subcommand.
     if let Cmd::Gui = command {
         return cmd_gui();
     }

@@ -9,6 +9,10 @@
 # Run from a clone with cargo installed and it builds from source; otherwise it
 # downloads the prebuilt binary for your platform from the GitHub release.
 #
+# A source build also installs `amdui`, the desktop board as its own command.
+# The release zip carries `amd` alone, which loses nothing: `amd gui` opens the
+# same window.
+#
 # Then, in any git repository:  amd init  &&  amd new "My first task"
 #
 set -euo pipefail
@@ -67,6 +71,11 @@ build_from_source() {
   ( cd "${SELF}" && cargo build --release --locked )
   mkdir -p "${DIR}"
   cp "${SELF}/target/release/amd" "${DIR}/amd"
+  # The desktop board is a default feature, but --no-default-features is a
+  # supported way to build, and then there is no amdui to copy.
+  if [ -f "${SELF}/target/release/amdui" ]; then
+    cp "${SELF}/target/release/amdui" "${DIR}/amdui"
+  fi
 }
 
 download_release() {
@@ -88,6 +97,11 @@ download_release() {
   [ -f "${TMP}/amd" ] || return 1
   mkdir -p "${DIR}"
   cp "${TMP}/amd" "${DIR}/amd"
+  # Present only once the release packages both binaries; until then `amd gui`
+  # is the way in to the board from a prebuilt install.
+  if [ -f "${TMP}/amdui" ]; then
+    cp "${TMP}/amdui" "${DIR}/amdui"
+  fi
 }
 
 if [ "${FROM_SOURCE}" = "1" ]; then
@@ -103,9 +117,14 @@ chmod +x "${DIR}/amd"
 
 echo "Installed amd -> ${DIR}/amd"
 "${DIR}/amd" --version || true
+if [ -f "${DIR}/amdui" ]; then
+  chmod +x "${DIR}/amdui"
+  echo "Installed amdui -> ${DIR}/amdui   (the desktop board)"
+fi
 case ":${PATH}:" in
   *":${DIR}:"*) ;;
   *) echo "Note: ${DIR} is not on your PATH. Add this to your shell profile:"
      echo "      export PATH=\"${DIR}:\$PATH\"" ;;
 esac
 echo "Then, in any repo:  amd init  &&  amd new \"My first task\""
+echo "For the desktop board:  amdui   (or amd gui)"
