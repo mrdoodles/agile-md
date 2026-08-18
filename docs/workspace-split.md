@@ -94,6 +94,18 @@ the signatures rather than after them is the whole point.
 Phases 0–4 are mechanical and should not change behaviour. Phases 5–6 change
 behaviour and each want their own review.
 
+## Packaging — settled before phase 4
+
+`rust-release` packaged one binary, so a release could ship `amd` or `amdui`
+but not both, and `amd gui` was the only way into the board for anyone who had
+not built from source. That constrained phase 4: taking egui out of `amd-cli`
+means `amd gui` has to exec `amdui`, which only works if `amdui` is installed.
+
+`bin-name` now takes a list (mrdoodles/rust-release), and this repo passes
+`"amd amdui"`. Both binaries go into one zip, named after the first, so the
+download URL install.sh has always used is unchanged. **The v1 tag has to move
+before a release picks this up** — release.yml pins `@v1`.
+
 ## Known drift to resolve on the way
 
 - `amd ls` sorts by id and ignores `order`; the board sorts by `order`.

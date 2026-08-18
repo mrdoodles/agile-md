@@ -9,9 +9,8 @@
 # Run from a clone with cargo installed and it builds from source; otherwise it
 # downloads the prebuilt binary for your platform from the GitHub release.
 #
-# A source build also installs `amdui`, the desktop board as its own command.
-# The release zip carries `amd` alone, which loses nothing: `amd gui` opens the
-# same window.
+# Installs two commands: `amd`, the command line, and `amdui`, the desktop
+# board. Both come from the release zip and from a source build.
 #
 # Then, in any git repository:  amd init  &&  amd new "My first task"
 #
@@ -97,8 +96,8 @@ download_release() {
   [ -f "${TMP}/amd" ] || return 1
   mkdir -p "${DIR}"
   cp "${TMP}/amd" "${DIR}/amd"
-  # Present only once the release packages both binaries; until then `amd gui`
-  # is the way in to the board from a prebuilt install.
+  # Guarded rather than assumed: `--version` can pin a release made before the
+  # zip carried both binaries, and `amd gui` is the way in to the board there.
   if [ -f "${TMP}/amdui" ]; then
     cp "${TMP}/amdui" "${DIR}/amdui"
   fi

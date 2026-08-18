@@ -1,12 +1,11 @@
 name: Release
 
-# Tag a release (git tag -a vX.Y.Z && git push --tags) and this builds `amd`
-# for every platform, then attaches amd-<target>.zip to the GitHub Release —
-# which is what install.sh downloads.
+# Tag a release (git tag -a vX.Y.Z && git push --tags) and this builds both
+# binaries for every platform, then attaches amd-<target>.zip to the GitHub
+# Release — which is what install.sh downloads.
 #
-# rust-release packages a single bin-name, so the zip carries `amd` and not the
-# `amdui` desktop binary. That loses nothing today — `amd gui` opens the same
-# window — but shipping amdui prebuilt needs rust-release to take a list.
+# The zip carries `amd` and `amdui`, and is named after the first of them, so
+# the download URL is the same one install.sh has always used.
 on:
   push:
     tags: ["v[0-9]+.[0-9]+.[0-9]+"]
@@ -20,6 +19,6 @@ jobs:
     with:
       platforms: "linux macos"
       architectures: "x86_64 aarch64"
-      bin-name: amd
+      bin-name: "amd amdui"
       upload-to-release: true
     secrets: inherit

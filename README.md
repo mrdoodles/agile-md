@@ -36,8 +36,7 @@ cargo build --release        # target/release/{amd,amdui}
 ```
 
 Two commands: **`amd`** is the command line, **`amdui`** is the desktop board.
-The release zip carries `amd` alone for now, which loses nothing — `amd gui`
-opens the same window.
+Both are in the release zip, and `amd gui` opens the same window as `amdui`.
 
 ## Use
 

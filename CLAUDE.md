@@ -76,18 +76,17 @@ unchanged. Still to move (docs/workspace-split.md): `gui/` belongs in amd-ui.
   binary.
 - `install.sh` — downloads the prebuilt `amd-<target>.zip` from the GitHub
   release, or builds from source in a clone (`--from-source`, `--dir`,
-  `--version`). Keep the two paths in sync. A source build installs `amdui`
-  too; both paths copy it only `if [ -f ... ]`, since the zip carries `amd`
-  alone.
+  `--version`). Keep the two paths in sync. Both paths install `amdui` as well,
+  guarded by `if [ -f ... ]` — `--version` can pin a release made before the
+  zip carried both.
 - `tests/test.sh` — assert-based end-to-end suite; builds with cargo and spins
   up temp git repos. Unit tests live next to the code in `#[cfg(test)] mod tests`.
 - `.github/workflows/ci.yml` — fmt + clippy + cargo test + tests/test.sh, and
   shellcheck for the shell files.
 - `.github/workflows/release.yml` — on a `vX.Y.Z` tag, calls
   `mrdoodles/rust-release` to build and attach `amd-<target>.zip` per platform.
-  **`rust-release` packages one binary** (`bin-name`), so a release currently
-  ships `amd` without `amdui`; `amd gui` is why that costs nothing. Shipping
-  both means teaching `rust-release` a list.
+  `bin-name: "amd amdui"` — rust-release takes a list and stages both binaries
+  into one zip, named after the first, so the download URL is unchanged.
 - `docs/adr/` — architecture decision records: why the tool is shaped as it
   is, and what each decision costs. `docs/workspace-split.md` is the plan for
   the amd-lib / amd-cli / amd-ui split (ADR-0004).
