@@ -16,57 +16,68 @@ MiniJinja templates**.
 
 ## Layout
 
-The crate is a **library plus two binaries**, so the command line and the
-desktop board share one implementation of the board.
+A **cargo workspace of three crates** (ADR-0004), so the command line and the
+desktop board share one implementation of the board and the boundary is
+enforced by the dependency graph rather than by review:
 
-- `src/lib.rs` — the library: `board`, `branch`, `create`, `git`, `group`,
+```
+crates/amd-lib/   the library (`agile_md`) — everything that touches the board
+crates/amd-cli/   → binary `amd`    (clap, inquire, the $EDITOR scratch file)
+crates/amd-ui/    → binary `amdui`  (egui/eframe)
+```
+
+The library keeps the crate name `agile_md`, so every `use` in the workspace is
+unchanged. Still to move (docs/workspace-split.md): `render.rs` belongs in
+amd-cli, and `gui/` in amd-ui.
+
+- `crates/amd-lib/src/lib.rs` — the library: `board`, `branch`, `create`, `git`, `group`,
   `registry`, `render`, `settings`, `task`, `templates` (and `gui` behind the
   default feature).
-- `src/create.rs` — making a ticket, split into `Draft::prepare` (resolve and
+- `crates/amd-lib/src/create.rs` — making a ticket, split into `Draft::prepare` (resolve and
   render, touching nothing) and `Draft::write` (file, child link, backlinks).
   That gap is what lets the CLI put the rendered ticket in `$EDITOR` before
   anything is written, while the desktop board writes what it already has.
-- `src/gui/` — the desktop board (feature `gui`, on by default): egui/eframe,
+- `crates/amd-lib/src/gui/` — the desktop board (feature `gui`, on by default): egui/eframe,
   the same stack as rustmark. `richtext.rs` edits a body line by line;
   `settings.rs` holds the text size and colour scheme.
-- `src/group.rs` — epics and sprints: the folders a backlog is divided into.
-- `src/settings.rs` — the shared config file, which keeps keys it does not
+- `crates/amd-lib/src/group.rs` — epics and sprints: the folders a backlog is divided into.
+- `crates/amd-lib/src/settings.rs` — the shared config file, which keeps keys it does not
   recognise so one writer cannot delete another's.
-- `src/main.rs` — the `amd` binary: clap CLI and command handlers; it also owns
+- `crates/amd-cli/src/main.rs` — the `amd` binary: clap CLI and command handlers; it also owns
   `form.rs`, `value.rs` and `completions.rs`, which are CLI-only.
-- `src/bin/amdui.rs` — the `amdui` binary: ~50 lines that call
+- `crates/amd-ui/src/main.rs` — the `amdui` binary: ~50 lines that call
   `agile_md::gui::run()`, so the board is something you launch rather than a
-  subcommand you remember. `required-features = ["gui"]` in Cargo.toml means a
-  `--no-default-features` build simply doesn't produce it. `amd gui` stays —
-  it's the same call, and it's what a prebuilt install has (see below).
-- `src/board.rs` — board discovery (`<repo-root>/${AMD_DIR:-tasks}`), the
+  subcommand you remember. `amd gui` stays — it's the same call, and it's what
+  a prebuilt install has (see below), which is why `amd-cli` keeps a `gui`
+  feature (on by default) rather than shedding egui entirely.
+- `crates/amd-lib/src/board.rs` — board discovery (`<repo-root>/${AMD_DIR:-tasks}`), the
   `Column` enum, task lookup, moves, `ensure`/`create`.
-- `src/task.rs` — `Task` (path, column, id, stem), frontmatter `meta` lookup,
+- `crates/amd-lib/src/task.rs` — `Task` (path, column, id, stem), frontmatter `meta` lookup,
   `slugify` (transliterates via `deunicode`, so a title in any script still
   makes a plain-ASCII filename and branch; symbols stay separators so an emoji
   doesn't become a word).
-- `src/templates.rs` — the MiniJinja `Environment`, built-in templates, board
+- `crates/amd-lib/src/templates.rs` — the MiniJinja `Environment`, built-in templates, board
   overrides, `TaskContext`, `required_extras`.
-- `src/form.rs` — every interactive prompt, built on `inquire` (text, select,
+- `crates/amd-cli/src/form.rs` — every interactive prompt, built on `inquire` (text, select,
   confirm, task picker, label autocomplete).
-- `src/branch.rs` — the branch-type taxonomy (`feature`, `bugfix`, `hotfix`,
+- `crates/amd-lib/src/branch.rs` — the branch-type taxonomy (`feature`, `bugfix`, `hotfix`,
   `release`, `chore`, overridable with `AMD_BRANCH_TYPES`) and git ref-name
   validation.
-- `src/render.rs` — board output: a rich tree (`richrs`) on a terminal, plain
+- `crates/amd-lib/src/render.rs` — board output: a rich tree (`richrs`) on a terminal, plain
   greppable text everywhere else. Moves to `amd-cli` under ADR-0004.
-- `src/completions.rs` — `amd completions [SHELL]`, generated from the clap
+- `crates/amd-cli/src/completions.rs` — `amd completions [SHELL]`, generated from the clap
   command with `clap_complete`; `$SHELL` detection and install hints.
-- `src/value.rs` — `TypedValueParser`s that advertise their possible values, so
+- `crates/amd-cli/src/value.rs` — `TypedValueParser`s that advertise their possible values, so
   completions and `--help` list them while validation stays ours.
-- `src/git.rs` — thin wrappers over the `git` CLI (`rev-parse`, `ls-files`,
+- `crates/amd-lib/src/git.rs` — thin wrappers over the `git` CLI (`rev-parse`, `ls-files`,
   `mv`, `config`).
-- `templates/*.md.jinja` — the built-in templates, `include_str!`'d into the
+- `crates/amd-lib/templates/*.md.jinja` — the built-in templates, `include_str!`'d into the
   binary.
 - `install.sh` — downloads the prebuilt `amd-<target>.zip` from the GitHub
   release, or builds from source in a clone (`--from-source`, `--dir`,
   `--version`). Keep the two paths in sync. A source build installs `amdui`
   too; both paths copy it only `if [ -f ... ]`, since the zip carries `amd`
-  alone and a `--no-default-features` build produces no `amdui`.
+  alone.
 - `tests/test.sh` — assert-based end-to-end suite; builds with cargo and spins
   up temp git repos. Unit tests live next to the code in `#[cfg(test)] mod tests`.
 - `.github/workflows/ci.yml` — fmt + clippy + cargo test + tests/test.sh, and
@@ -119,7 +130,7 @@ desktop board share one implementation of the board.
   `amd edit`). **`AMD_TYPES` is dead** — it was in `--help` long after nothing
   read it.
 
-## Ticket fields (`src/branch.rs`, `templates/ticket.md.jinja`)
+## Ticket fields (`crates/amd-lib/src/branch.rs`, `templates/ticket.md.jinja`)
 
 - **One ticket, one template.** There are no ticket types any more: `admin` and
   `development` collapsed into fields you either fill in or don't.
@@ -150,7 +161,7 @@ desktop board share one implementation of the board.
   else derives one from `branch-type` and the title. **Order matters**: `git mv`
   is staged first so the rename travels with the switch.
 
-## Board rendering (`src/render.rs`)
+## Board rendering (`crates/amd-lib/src/render.rs`)
 
 - Each column is a **tree**: `forest()` nests tasks by `parent`, ordered by id
   at every level. A child whose parent is in another column stays at the top
@@ -170,7 +181,7 @@ desktop board share one implementation of the board.
 - A rendering failure falls back to plain output rather than erroring: never
   let cosmetics stop someone seeing the board.
 
-## Forms (`src/form.rs`)
+## Forms (`crates/amd-cli/src/form.rs`)
 
 - **Prompting is always optional.** `form::available()` gates every prompt on
   `stdin` *and* `stdout` being a terminal, plus `--no-input`/`AMD_NO_INPUT=1`.
@@ -216,7 +227,7 @@ desktop board share one implementation of the board.
 - Template errors are flattened by `render_error()` (message + line + cause
   chain + MiniJinja debug info); without that only the top line survives.
 
-## Several repositories (`src/registry.rs`)
+## Several repositories (`crates/amd-lib/src/registry.rs`)
 
 - The registry is **a list of repository paths and nothing else**, one per line
   at `$XDG_CONFIG_HOME/agile-md/repos`. There is deliberately no store of
@@ -247,7 +258,7 @@ desktop board share one implementation of the board.
   `Cli::command()`, so a new flag is completable the moment it exists. Handled
   before `Board::ensure()` — it must work outside a repo, which is exactly when
   people set completion up.
-- Value-level completion comes from `src/value.rs`. `TypedValueParser` lets a
+- Value-level completion comes from `crates/amd-cli/src/value.rs`. `TypedValueParser` lets a
   parser advertise `possible_values()` (used by completions and `--help`) while
   `parse_ref()` keeps our own validation and error text — `PossibleValuesParser`
   alone would have replaced "unknown branch type 'x' … set AMD_BRANCH_TYPES"
@@ -262,7 +273,8 @@ desktop board share one implementation of the board.
 ## Commands
 
 ```bash
-cargo test
+cargo test                          # the whole workspace
+cargo build -p amd-cli --no-default-features   # the CLI with no windowing stack
 bash tests/test.sh
 cargo clippy --all-targets --all-features -- -D warnings
 cargo fmt --all --check
@@ -304,7 +316,7 @@ changes):
   layout still work; v3 task files simply have no labels, so `amd start` on one
   leaves the branch alone.
 
-## The desktop board (`src/gui/`)
+## The desktop board (`crates/amd-lib/src/gui/`)
 
 - egui/eframe, the same stack as rustmark, so the two look alike and a ticket
   body could be handed to it. `App::ui` takes a `&mut Ui`, not a context —

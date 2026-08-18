@@ -32,8 +32,8 @@ everything else.
 `git rev-parse --show-toplevel` — is a convenience for front ends that have a
 current directory to speak of.
 
-Both already exist ([board.rs:86](../../src/board.rs#L86) and
-[board.rs:102](../../src/board.rs#L102)). The constraint is that **operations
+Both already exist ([board.rs:86](../../crates/amd-lib/src/board.rs#L86) and
+[board.rs:102](../../crates/amd-lib/src/board.rs#L102)). The constraint is that **operations
 take a board and never call `locate()` internally**, so no library code path
 depends on there being one current repository.
 
@@ -43,7 +43,7 @@ possible, and what lets tests construct a board without changing directory.
 ### 2. Identity is a parameter, not an ambient fact
 
 Today the library reads `git config user.name` and `user.email` from inside
-`Draft::prepare` ([create.rs:145](../../src/create.rs#L145)). That is correct
+`Draft::prepare` ([create.rs:145](../../crates/amd-lib/src/create.rs#L145)). That is correct
 for one person at one terminal and wrong for anything else: a server acts for
 many users, and an agent acts *on behalf of* someone who is not the process
 owner.

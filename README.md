@@ -31,6 +31,7 @@ into `/usr/local/bin` when it's writable, otherwise `~/bin`. Override with
 
 ```bash
 cargo build --release        # target/release/{amd,amdui}
+# a workspace: crates/amd-lib (the library), crates/amd-cli, crates/amd-ui
 ./install.sh                 # builds and installs
 ```
 
@@ -209,9 +210,9 @@ total a lie — and once started it takes nothing more and gives nothing back.
 An **epic** takes anything: it is where work goes before anyone has estimated
 it.
 
-The board is a default feature; `--no-default-features` builds the command line
-alone — no `amdui` binary and no windowing stack — which is what CI and scripts
-want.
+A plain `cargo build` gives you both binaries. For the command line alone —
+no windowing stack, which is what CI and scripts want —
+`cargo build -p amd-cli --no-default-features`.
 
 ## Driving it from the command line
 
@@ -233,8 +234,8 @@ The rules live in the board, not the window, so the command line gets them
 too: a sprint refuses an unsized ticket, and a started one takes nothing more
 and gives nothing back.
 
-`--no-default-features` builds this without the desktop board — the whole API,
-no windowing stack, which is what CI and scripts want.
+`cargo build -p amd-cli --no-default-features` builds this without the desktop
+board — the whole API, no windowing stack, which is what CI and scripts want.
 
 ## Shell completion
 

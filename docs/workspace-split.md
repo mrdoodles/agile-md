@@ -38,25 +38,43 @@ Binary names are unchanged. `install.sh` and the release URL keep working.
 
 Each phase ends with a green build, green `cargo test`, green `tests/test.sh`.
 
-**Phase 0 — make the spec green.** `tests/test.sh` has 29 failing assertions:
-it asserts `tasks/todo/001-first-task.md` while `amd new` now lands in
-`backlog/`. This is a precondition, not a nicety — the suite is the only
-safety net for moving 5,000 lines, and a red suite cannot tell us whether the
-move broke something.
+**Phase 0 — make the spec green. ✅ done.** 136 passing, 0 failing. The 29
+failures were stale assertions, not regressions: `amd new` lands in `backlog/`
+and the junk drawer became `archive/`. `amd set` and `amd group` had no
+coverage at all and now have 17 assertions, verified by mutation.
 
-**Phase 1 — fix the stale surfaces.** The obsolete "two ticket types"
-help text in `main.rs`, the `# GUI only` comment above `clap_complete` in
-`Cargo.toml`, and the TUI reference in `settings.rs`. Cheap, and it stops the
-next reader inheriting the confusion.
+**Phase 1 — fix the stale surfaces. ✅ done.** The obsolete "two ticket types"
+help text, `AMD_TYPES` documented in `--help` long after nothing read it, the
+`# GUI only` comment above `clap_complete`, and the TUI references. Two unit
+tests were pinned to the wrong documentation and asserted on it; they now
+assert on values a parser actually advertises.
 
-**Phase 2 — workspace, one crate.** Introduce the workspace with `amd-lib`
-only; the binaries stay where they are and depend on it. Nothing moves yet.
+**Phase 2 — the workspace. ✅ done.** All three crates exist and every file is
+under one of them, moved with `git mv` so history follows. `amd-lib` keeps the
+crate name `agile_md`, so no `use` in the workspace changed. Two things stayed
+behind deliberately, because phase 2 is mechanical and neither is:
 
-**Phase 3 — extract `amd-cli`.** Move the CLI modules and `render.rs`. This is
-where the library stops printing.
+- `render.rs` is still in `amd-lib` — moving it is phase 3, along with the
+  library's `println!`s.
+- `gui/` is still in `amd-lib` behind the `gui` feature (off by default, so
+  `amd-cli` pulls no windowing stack) — moving it is phase 4.
 
-**Phase 4 — extract `amd-ui`.** Move the GUI, splitting `gui/settings.rs` into
-schema (`amd-ui`) and storage (`amd-lib`).
+`amd-cli` therefore keeps a `gui` feature, on by default, so that `amd gui`
+behaves exactly as it did. Making it exec the `amdui` binary instead would take
+egui out of `amd-cli` entirely, but a prebuilt install ships only `amd`, so
+that trade belongs to packaging rather than to a mechanical phase.
+
+**Note:** `cargo build --no-default-features` at the workspace root no longer
+produces a CLI-only build — `amd-ui` requires `agile-md/gui`, and feature
+unification turns it back on. The headless build is now
+`cargo build -p amd-cli --no-default-features`. README and CLAUDE.md say so.
+
+**Phase 3 — `render.rs` to `amd-cli`.** This is where the library stops
+printing: `board.rs`'s `println!` becomes a returned value.
+
+**Phase 4 — `gui/` to `amd-ui`.** Splitting `gui/settings.rs` into schema
+(`amd-ui`) and storage (`amd-lib`), after which `amd-lib` lists no `egui` at
+all and the rule in ADR-0004 is fully enforced by the manifest.
 
 **Phase 5 — the operation vocabulary.** One write per action, typed failures,
 `--json`, the parity test ([ADR-0006](adr/0006-the-operation-vocabulary.md)).
