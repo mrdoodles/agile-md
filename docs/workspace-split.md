@@ -101,10 +101,23 @@ but not both, and `amd gui` was the only way into the board for anyone who had
 not built from source. That constrained phase 4: taking egui out of `amd-cli`
 means `amd gui` has to exec `amdui`, which only works if `amdui` is installed.
 
-`bin-name` now takes a list (mrdoodles/rust-release), and this repo passes
-`"amd amdui"`. Both binaries go into one zip, named after the first, so the
-download URL install.sh has always used is unchanged. **The v1 tag has to move
-before a release picks this up** — release.yml pins `@v1`.
+The fix: `bin-name` takes a space/comma list, every named binary is staged into
+the same zip, and the zip keeps the name of the **first** so the download URL
+install.sh has always used is unchanged. A single name behaves exactly as
+before. The `[package] name` fallback needs `|| true`, because grep exits 1
+when there is no match and `set -o pipefail` kills the step before the error
+can explain itself — and a virtual workspace manifest has no `[package] name`
+at all, which is precisely the layout that has several binaries.
+
+**Status: not done.** That change was written and committed locally in
+`mrdoodles/rust-release`, then lost — the repo moved to `lite-actions` and the
+laptop crashed, and the commit was never pushed. It must be redone in
+[lite-actions/rust-release](https://github.com/lite-actions/rust-release).
+
+Until it is, a tagged release **fails**: this repo already passes
+`bin-name: "amd amdui"`, and a workflow that takes one name looks for a binary
+literally called `amd amdui`. It fails loudly rather than shipping a short zip,
+but it fails. The `@v1` tag has to move once the feature lands.
 
 ## Known drift to resolve on the way
 

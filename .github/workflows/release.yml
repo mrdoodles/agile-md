@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   release:
-    uses: mrdoodles/rust-release/.github/workflows/rust-release.yml@v1
+    uses: lite-actions/rust-release/.github/workflows/rust-release.yml@v1
     with:
       platforms: "linux macos"
       architectures: "x86_64 aarch64"

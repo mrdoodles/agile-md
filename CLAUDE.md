@@ -84,9 +84,11 @@ unchanged. Still to move (docs/workspace-split.md): `gui/` belongs in amd-ui.
 - `.github/workflows/ci.yml` — fmt + clippy + cargo test + tests/test.sh, and
   shellcheck for the shell files.
 - `.github/workflows/release.yml` — on a `vX.Y.Z` tag, calls
-  `mrdoodles/rust-release` to build and attach `amd-<target>.zip` per platform.
-  `bin-name: "amd amdui"` — rust-release takes a list and stages both binaries
-  into one zip, named after the first, so the download URL is unchanged.
+  `lite-actions/rust-release` to build and attach `amd-<target>.zip` per platform.
+  `bin-name: "amd amdui"` — this needs rust-release to accept a list of
+  binaries. **That change was lost in a laptop crash and must be redone**
+  (lite-actions/rust-release); until it is, a tagged release fails looking for
+  a binary literally named "amd amdui".
 - `docs/adr/` — architecture decision records: why the tool is shaped as it
   is, and what each decision costs. `docs/workspace-split.md` is the plan for
   the amd-lib / amd-cli / amd-ui split (ADR-0004).
